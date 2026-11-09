@@ -1,0 +1,57 @@
+
+######## 2025-03 ########
+
+=== Nulos estructurales por payment_type ===
+payment_type | viajes | pasajeros_nulo | congestion_nulo
+0 | 916663 | 916663 | 916663
+1 | 2704166 | 0 | 0
+2 | 405847 | 0 | 0
+3 | 26924 | 0 | 0
+4 | 91657 | 0 | 0
+
+=== Bajada igual vs anterior a la subida, por VendorID ===
+VendorID | iguales | anteriores
+1 | 622 | 8
+2 | 93 | 0
+6 | 3 | 73
+7 | 21481 | 0
+
+=== Tarifa <= 0 por payment_type ===
+payment_type | viajes | tarifa_cero_o_neg
+0 | 916663 | 140483
+1 | 2704166 | 106
+2 | 405847 | 17651
+3 | 26924 | 8934
+4 | 91657 | 43204
+
+=== Candidatos a umbral: cuantas filas pasan cada limite ===
+dist_mas_50 | dist_mas_100 | dist_mas_200 | dur_mas_12h | dur_mas_24h | vel_mas_60 | vel_mas_80 | vel_mas_100 | total_mas_500 | total_mas_1000
+595 | 214 | 179 | 1214 | 11 | 1258 | 1050 | 961 | 73 | 17
+
+######## 2024-03 ########
+
+=== Nulos estructurales por payment_type ===
+payment_type | viajes | pasajeros_nulo | congestion_nulo
+0 | 426190 | 426190 | 426190
+1 | 2597102 | 0 | 0
+2 | 477660 | 0 | 0
+3 | 23458 | 0 | 0
+4 | 58218 | 0 | 0
+
+=== Bajada igual vs anterior a la subida, por VendorID ===
+VendorID | iguales | anteriores
+1 | 846 | 20
+2 | 160 | 0
+6 | 5 | 97
+
+=== Tarifa <= 0 por payment_type ===
+payment_type | viajes | tarifa_cero_o_neg
+0 | 426190 | 14646
+1 | 2597102 | 183
+2 | 477660 | 10763
+3 | 23458 | 7212
+4 | 58218 | 26952
+
+=== Candidatos a umbral: cuantas filas pasan cada limite ===
+dist_mas_50 | dist_mas_100 | dist_mas_200 | dur_mas_12h | dur_mas_24h | vel_mas_60 | vel_mas_80 | vel_mas_100 | total_mas_500 | total_mas_1000
+508 | 122 | 95 | 1746 | 20 | 1435 | 1241 | 1178 | 44 | 1

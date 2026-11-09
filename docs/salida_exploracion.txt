@@ -1,0 +1,165 @@
+
+######## 2025-03 ########
+
+=== Filas y rango de fechas de subida ===
+filas | primera_subida | ultima_subida
+4145257 | 2007-12-05 18:45:00 | 2025-04-01 00:00:17
+
+=== Resumen por columna (tipo, min, max, % nulos) ===
+column_name | column_type | min | max | null_percentage
+VendorID | INTEGER | 1 | 7 | 0.00
+tpep_pickup_datetime | TIMESTAMP | 2007-12-05 18:45:00 | 2025-04-01 00:00:17 | 0.00
+tpep_dropoff_datetime | TIMESTAMP | 2007-12-05 19:02:00 | 2025-04-03 14:07:50 | 0.00
+passenger_count | BIGINT | 0 | 9 | 22.11
+trip_distance | DOUBLE | 0.0 | 320136.29 | 0.00
+RatecodeID | BIGINT | 1 | 99 | 22.11
+store_and_fwd_flag | VARCHAR | N | Y | 22.11
+PULocationID | INTEGER | 1 | 265 | 0.00
+DOLocationID | INTEGER | 1 | 265 | 0.00
+payment_type | BIGINT | 0 | 4 | 0.00
+fare_amount | DOUBLE | -999.0 | 46263.88 | 0.00
+extra | DOUBLE | -9.25 | 13.5 | 0.00
+mta_tax | DOUBLE | -0.5 | 10.5 | 0.00
+tip_amount | DOUBLE | -92.09 | 290.0 | 0.00
+tolls_amount | DOUBLE | -142.17 | 916.87 | 0.00
+improvement_surcharge | DOUBLE | -1.0 | 1.0 | 0.00
+total_amount | DOUBLE | -1000.0 | 46269.44 | 0.00
+congestion_surcharge | DOUBLE | -2.5 | 2.5 | 22.11
+Airport_fee | DOUBLE | -1.75 | 6.75 | 22.11
+cbd_congestion_fee | DOUBLE | -0.75 | 1.5 | 0.00
+
+=== Filas sospechosas (cantidad por condicion) ===
+distancia_cero_o_neg | importe_negativo | tarifa_cero_o_neg | pasajeros_nulo | pasajeros_cero | bajada_no_posterior | subida_fuera_de_mes
+103722 | 68686 | 210378 | 916663 | 22715 | 22280 | 33
+
+=== Percentiles de distancia (p50, p99, p99.9, p99.99) y maximo ===
+percentiles | maximo
+[1.8, 19.42, 28.800000000000004, 58.028464000010864] | 320136.29
+
+=== Percentiles de duracion en minutos (solo duracion > 0) y maximo ===
+percentiles | maximo_min
+[12.516666666666667, 65.1, 104.66706666667015, 1430.4567466666613] | 6275.833333333333
+
+=== Velocidad promedio en mph (distancia > 0 y duracion > 0) ===
+percentiles | viajes_mas_de_100_mph
+[9.78444236176195, 34.3125, 46.074024588263114, 1080.0] | 961
+
+=== Percentiles de total_amount y maximo ===
+percentiles | maximo
+[20.75, 103.2, 162.00743999999946, 326.1848800000362] | 46269.44
+
+=== Los 5 viajes de mayor distancia ===
+trip_distance | tpep_pickup_datetime | tpep_dropoff_datetime | total_amount
+320136.29 | 2025-03-27 20:52:00 | 2025-03-27 20:59:00 | 2.38
+281085.57 | 2025-03-27 06:32:00 | 2025-03-27 06:42:00 | 11.48
+280125.56 | 2025-03-22 05:11:00 | 2025-03-22 05:31:00 | 23.03
+254846.53 | 2025-03-23 14:11:00 | 2025-03-23 14:27:00 | 21.17
+253020.38 | 2025-03-02 10:01:00 | 2025-03-02 10:10:00 | 11.09
+
+=== Las 5 duraciones mas largas (horas) ===
+horas | trip_distance | total_amount
+104.6 | 14.55 | 78.69
+90.9 | 0.83 | 13.35
+82.6 | 1.62 | 17.85
+64.0 | 0.92 | 13.65
+42.8 | 5.8 | 51.83
+
+=== Tipos de pago: viajes y propina media ===
+payment_type | viajes | propina_media
+0 | 916663 | 0.37
+1 | 2704166 | 4.26
+2 | 405847 | 0.0
+3 | 26924 | 0.02
+4 | 91657 | 0.04
+
+=== Zonas: ids inexistentes en la tabla de zonas y zonas 264/265 ===
+zona_inexistente | zona_unknown
+0 | 28415
+
+=== Duplicados exactos (puede tardar) ===
+filas | filas_distintas
+4145257 | 4145257
+
+######## 2024-03 ########
+
+=== Filas y rango de fechas de subida ===
+filas | primera_subida | ultima_subida
+3582628 | 2002-12-31 22:17:10 | 2024-04-01 00:34:55
+
+=== Resumen por columna (tipo, min, max, % nulos) ===
+column_name | column_type | min | max | null_percentage
+VendorID | INTEGER | 1 | 6 | 0.00
+tpep_pickup_datetime | TIMESTAMP | 2002-12-31 22:17:10 | 2024-04-01 00:34:55 | 0.00
+tpep_dropoff_datetime | TIMESTAMP | 2002-12-31 22:42:24 | 2024-04-02 18:08:46 | 0.00
+passenger_count | BIGINT | 0 | 9 | 11.90
+trip_distance | DOUBLE | 0.0 | 176836.3 | 0.00
+RatecodeID | BIGINT | 1 | 99 | 11.90
+store_and_fwd_flag | VARCHAR | N | Y | 11.90
+PULocationID | INTEGER | 1 | 265 | 0.00
+DOLocationID | INTEGER | 1 | 265 | 0.00
+payment_type | BIGINT | 0 | 4 | 0.00
+fare_amount | DOUBLE | -800.0 | 900.0 | 0.00
+extra | DOUBLE | -7.5 | 14.25 | 0.00
+mta_tax | DOUBLE | -0.5 | 35.84 | 0.00
+tip_amount | DOUBLE | -300.0 | 999.99 | 0.00
+tolls_amount | DOUBLE | -84.3 | 163.0 | 0.00
+improvement_surcharge | DOUBLE | -1.0 | 1.0 | 0.00
+total_amount | DOUBLE | -800.99 | 1021.99 | 0.00
+congestion_surcharge | DOUBLE | -2.5 | 2.5 | 11.90
+Airport_fee | DOUBLE | -1.75 | 1.75 | 11.90
+
+=== Filas sospechosas (cantidad por condicion) ===
+distancia_cero_o_neg | importe_negativo | tarifa_cero_o_neg | pasajeros_nulo | pasajeros_cero | bajada_no_posterior | subida_fuera_de_mes
+87168 | 44311 | 59756 | 426190 | 40372 | 1128 | 23
+
+=== Percentiles de distancia (p50, p99, p99.9, p99.99) y maximo ===
+percentiles | maximo
+[1.75, 19.9, 29.299999999999997, 56.19474600000307] | 176836.3
+
+=== Percentiles de duracion en minutos (solo duracion > 0) y maximo ===
+percentiles | maximo_min
+[12.483333333333333, 67.1, 117.67501666666939, 1435.1116699999973] | 9092.55
+
+=== Velocidad promedio en mph (distancia > 0 y duracion > 0) ===
+percentiles | viajes_mas_de_100_mph
+[9.589041095890412, 34.717581923451895, 48.38717279661843, 1800.0] | 1178
+
+=== Percentiles de total_amount y maximo ===
+percentiles | maximo
+[20.52, 103.36, 170.94, 327.5972130001243] | 1021.99
+
+=== Los 5 viajes de mayor distancia ===
+trip_distance | tpep_pickup_datetime | tpep_dropoff_datetime | total_amount
+176836.3 | 2024-03-07 07:41:00 | 2024-03-07 07:54:00 | 32.74
+176744.79 | 2024-03-29 10:43:00 | 2024-03-29 11:18:00 | 114.68
+176329.23 | 2024-03-22 07:35:00 | 2024-03-22 07:55:00 | 34.51
+138097.21 | 2024-03-16 18:31:00 | 2024-03-16 19:26:00 | 108.4
+136660.1 | 2024-03-25 07:46:00 | 2024-03-25 07:58:00 | 19.89
+
+=== Las 5 duraciones mas largas (horas) ===
+horas | trip_distance | total_amount
+151.5 | 0.0 | 4.5
+80.3 | 0.0 | 6.6
+76.9 | 0.0 | 4.5
+74.5 | 0.0 | 4.5
+67.9 | 9.81 | 58.84
+
+=== Tipos de pago: viajes y propina media ===
+payment_type | viajes | propina_media
+0 | 426190 | 0.63
+1 | 2597102 | 4.3
+2 | 477660 | 0.0
+3 | 23458 | 0.01
+4 | 58218 | 0.05
+
+=== Zonas: ids inexistentes en la tabla de zonas y zonas 264/265 ===
+zona_inexistente | zona_unknown
+0 | 35374
+
+=== Duplicados exactos (puede tardar) ===
+filas | filas_distintas
+3582628 | 3582628
+
+=== Diferencias de esquema 2025 vs 2024 (nombre o tipo) ===
+columna | tipo_2025 | tipo_2024 | nombre_2025 | nombre_2024
+cbd_congestion_fee | DOUBLE | None | cbd_congestion_fee | None
