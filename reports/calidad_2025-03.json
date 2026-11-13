@@ -1,0 +1,95 @@
+{
+  "mes": "2025-03",
+  "archivo": "yellow_tripdata_2025-03.parquet",
+  "generado_utc": "2026-11-13T20:35:20.080153+00:00",
+  "filas_leidas": 4145257,
+  "aceptadas": 3955293,
+  "cuarentena": 189964,
+  "pct_cuarentena": 4.58,
+  "aceptadas_con_advertencia": 899436,
+  "rechazo_por_regla": {
+    "R01": 33,
+    "R02": 22280,
+    "R03": 103722,
+    "R04": 214,
+    "R05": 68686,
+    "R07": 0,
+    "R08": 0,
+    "R09": 961,
+    "R11": 17
+  },
+  "advertencias_por_regla": {
+    "R06": 875764,
+    "R10": 25145
+  },
+  "nota": "Una fila puede violar varias reglas: la suma de rechazo_por_regla puede superar a cuarentena.",
+  "reglas": [
+    {
+      "id": "R01",
+      "descripcion": "Subida fuera del mes del archivo",
+      "severidad": "rechazo",
+      "umbral": "inicio de mes <= subida < inicio del mes siguiente"
+    },
+    {
+      "id": "R02",
+      "descripcion": "Bajada anterior o igual a la subida",
+      "severidad": "rechazo",
+      "umbral": "bajada > subida"
+    },
+    {
+      "id": "R03",
+      "descripcion": "Distancia menor o igual a 0",
+      "severidad": "rechazo",
+      "umbral": "distancia > 0"
+    },
+    {
+      "id": "R04",
+      "descripcion": "Distancia mayor al máximo",
+      "severidad": "rechazo",
+      "umbral": "distancia <= 100 millas"
+    },
+    {
+      "id": "R05",
+      "descripcion": "Importe total negativo",
+      "severidad": "rechazo",
+      "umbral": "total_amount >= 0"
+    },
+    {
+      "id": "R06",
+      "descripcion": "Pasajeros nulo o 0",
+      "severidad": "advertencia",
+      "umbral": "pasajeros >= 1"
+    },
+    {
+      "id": "R07",
+      "descripcion": "Zona de origen o destino inexistente en la tabla de zonas",
+      "severidad": "rechazo",
+      "umbral": "id presente en taxi_zone_lookup"
+    },
+    {
+      "id": "R08",
+      "descripcion": "Fila duplicada exacta",
+      "severidad": "rechazo",
+      "umbral": "se conserva la primera ocurrencia"
+    },
+    {
+      "id": "R09",
+      "descripcion": "Velocidad promedio imposible",
+      "severidad": "rechazo",
+      "umbral": "velocidad <= 100 mph"
+    },
+    {
+      "id": "R10",
+      "descripcion": "Zona Unknown (264 o 265)",
+      "severidad": "advertencia",
+      "umbral": "n/a"
+    },
+    {
+      "id": "R11",
+      "descripcion": "Importe total excesivo",
+      "severidad": "rechazo",
+      "umbral": "total_amount <= 1000 USD"
+    }
+  ],
+  "reconciliacion": "ok"
+}
