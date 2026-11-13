@@ -1,0 +1,82 @@
+- id: R01
+  descripcion: Subida fuera del mes del archivo
+  severidad: rechazo
+  umbral: "inicio de mes <= subida < inicio del mes siguiente"
+  justificacion: "Un viaje de otra fecha contamina conteos y particiones por mes. La exploración encontró subidas de 2007 y 2002."
+  violacion: "COALESCE(tpep_pickup_datetime < TIMESTAMP '{inicio_mes}' OR tpep_pickup_datetime >= TIMESTAMP '{fin_mes}', TRUE)"
+
+- id: R02
+  descripcion: Bajada anterior o igual a la subida
+  severidad: rechazo
+  umbral: "bajada > subida"
+  justificacion: "Duración no positiva es imposible y rompe duración y velocidad. Excluye al VendorID 7 de 2025 (100 % de sus viajes)."
+  violacion: "COALESCE(tpep_dropoff_datetime <= tpep_pickup_datetime, TRUE)"
+
+- id: R03
+  descripcion: Distancia menor o igual a 0
+  severidad: rechazo
+  umbral: "distancia > 0"
+  justificacion: "Sin distancia no hay viaje utilizable y se rompe la velocidad."
+  violacion: "COALESCE(trip_distance <= 0, TRUE)"
+
+- id: R04
+  descripcion: Distancia mayor al máximo
+  severidad: rechazo
+  umbral: "distancia <= 100 millas"
+  justificacion: "p99,99 = 58 mi (2025) y 56 mi (2024). Entre 100 y 200 mi casi no hay viajes y el máximo llega a 320.136 mi: son errores de registro."
+  violacion: "COALESCE(trip_distance > 100, FALSE)"
+
+- id: R05
+  descripcion: Importe total negativo
+  severidad: rechazo
+  umbral: "total_amount >= 0"
+  justificacion: "Reembolsos o disputas no representan el ingreso de un viaje."
+  violacion: "COALESCE(total_amount < 0, TRUE)"
+
+- id: R06
+  descripcion: Pasajeros nulo o 0
+  severidad: advertencia
+  umbral: "pasajeros >= 1"
+  justificacion: "Los nulos coinciden 1 a 1 con payment_type = 0 (22 % de 2025), así que son estructurales. Rechazarlos descartaría viajes válidos; no afectan importes."
+  violacion: "COALESCE(passenger_count < 1, TRUE)"
+
+- id: R07
+  descripcion: Zona de origen o destino inexistente en la tabla de zonas
+  severidad: rechazo
+  umbral: "id presente en taxi_zone_lookup"
+  justificacion: "Sin zona no se puede enriquecer ni unir al modelo (clave huérfana). En estos meses no hay casos."
+  violacion: >-
+    COALESCE(pu_location_id IS NULL OR do_location_id IS NULL
+    OR pu_location_id NOT IN (SELECT location_id FROM zonas)
+    OR do_location_id NOT IN (SELECT location_id FROM zonas), TRUE)
+
+- id: R08
+  descripcion: Fila duplicada exacta
+  severidad: rechazo
+  umbral: "se conserva la primera ocurrencia"
+  justificacion: "Duplicar infla viajes e ingresos. Se descartan solo las repeticiones. En estos meses no hay casos."
+  violacion: "rn > 1"
+
+- id: R09
+  descripcion: Velocidad promedio imposible
+  severidad: rechazo
+  umbral: "velocidad <= 100 mph"
+  justificacion: "Regla propia, descubierta explorando: p99,9 = 46 mph y p99,99 pasa de 1.000 mph. Hay 961 filas (2025) y 1.178 (2024) sobre 100 mph."
+  violacion: >-
+    COALESCE(CASE WHEN date_diff('second', tpep_pickup_datetime, tpep_dropoff_datetime) > 0
+    THEN trip_distance / (date_diff('second', tpep_pickup_datetime, tpep_dropoff_datetime) / 3600.0) > 100
+    ELSE FALSE END, FALSE)
+
+- id: R10
+  descripcion: Zona Unknown (264 o 265)
+  severidad: advertencia
+  umbral: "n/a"
+  justificacion: "Existen en la tabla de zonas pero no informan ubicación. Se conservan y se marcan."
+  violacion: "COALESCE(pu_location_id IN (264, 265) OR do_location_id IN (264, 265), FALSE)"
+
+- id: R11
+  descripcion: Importe total excesivo
+  severidad: rechazo
+  umbral: "total_amount <= 1000 USD"
+  justificacion: "Regla propia, descubierta explorando: p99,99 = 326 USD y el máximo llega a 46.269. Solo 17 filas (2025) y 1 (2024) superan 1.000."
+  violacion: "COALESCE(total_amount > 1000, FALSE)"
