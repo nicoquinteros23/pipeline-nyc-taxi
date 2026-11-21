@@ -1,4 +1,5 @@
 import duckdb
+import pyarrow.parquet as pq
 import pytest
 
 from src.calidad import contar_filas, procesar_mes
@@ -31,6 +32,8 @@ def test_derivadas_y_zonas(tmp_path):
     assert str(f["pickup_date"]) == "2025-03-10"
     assert f["tip_pct"] == pytest.approx(100 * 2 / 15)
     assert (f["pu_zone"], f["pu_borough"], f["do_zone"], f["do_borough"]) == ("Z1", "A", "Z2", "B")
+    cols_archivo = set(pq.read_schema(base / "curated" / "trips" / "year=2025" / "month=3" / "data.parquet").names)
+    assert "year" not in cols_archivo and "month" not in cols_archivo
 
 
 def test_tip_pct_es_null_si_la_tarifa_es_cero(tmp_path):

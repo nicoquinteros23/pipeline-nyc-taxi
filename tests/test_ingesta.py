@@ -72,8 +72,8 @@ def test_reintentos_con_espera_creciente(tmp_path, monkeypatch):
     with pytest.raises(requests.ConnectionError):
         ingesta.descargar("http://ejemplo", tmp_path / "a.csv")
 
-    assert len(intentos) == 3                       # hasta 3 intentos
-    assert esperas == [2, 4]                        # espera creciente
+    assert len(intentos) == 4                       # 1 intento inicial + 3 reintentos
+    assert esperas == [2, 4, 8]                     # espera creciente
     assert not list(tmp_path.glob("*.part"))        # sin archivos a medias
 
 

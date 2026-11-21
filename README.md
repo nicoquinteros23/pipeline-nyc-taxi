@@ -11,10 +11,10 @@ Stack: Python 3.10 o superior (probado con 3.12), DuckDB, PyArrow, PyYAML, reque
 Requisitos: Python 3.10+, Git y conexión a internet la primera vez (se descargan los archivos de la TLC, unas decenas de MB por mes).
 
 ```bash
-git clone <URL-del-repositorio>
+git clone https://github.com/nicoquinteros23/pipeline-nyc-taxi.git
 cd pipeline-nyc-taxi
 python -m venv .venv
-source .venv/bin/activate          # Windows PowerShell: .venv\Scripts\activate
+source .venv/bin/activate          # Windows PowerShell: .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 ```
 
@@ -81,7 +81,7 @@ intermedias.
 - **Idempotencia:** si el archivo existe y su SHA-256 coincide con el último hash registrado como `ok`
   en el log, no se vuelve a descargar (se registra la acción `omitido`). Si no coincide, se descarga de nuevo.
 - El log solo agrega líneas: es un historial de intentos. Lo que no debe duplicarse son los datos.
-- Hasta 3 intentos con espera creciente (2 s, 4 s, 8 s), solo para errores transitorios (fallas de red
+- Hasta 3 reintentos (4 intentos en total) con espera creciente (2 s, 4 s, 8 s), solo para errores transitorios (fallas de red
   y HTTP 429, 500, 502, 503 y 504). Los errores permanentes fallan de inmediato. El servidor responde
   **403** (no 404) cuando un archivo no existe, por ejemplo un mes no publicado.
 - Si la ingesta falla, se registra `estado=error` y el proceso termina con código 1.
@@ -218,16 +218,17 @@ archivos ya descargados:
 
 | Etapa | Segundos |
 |---|---|
-| ingesta | 0,3 |
-| esquema | 0,2 |
-| calidad (dos meses) | 18,6 |
-| transformación (dos meses) | 7,1 |
-| modelo | 1,2 |
-| preguntas | 0,9 |
-| **Total** | **28,3** |
+| ingesta | 0,2 |
+| esquema | 0,1 |
+| calidad (dos meses) | 24,7 |
+| transformación (dos meses) | 7,5 |
+| modelo | 0,5 |
+| preguntas | 1,1 |
+| **Total** | **34,1** |
 
-**Pico de RAM del proceso: 2,02 GB** (muestreado cada 0,2 s; DuckDB corre dentro del proceso).
-La primera ejecución desde un clon limpio suma el tiempo de descarga de los tres archivos: ACA TENGO QUE CORRERLO DE CERO.
+**Pico de RAM del proceso: 1,91 GB** (muestreado cada 0,2 s; DuckDB corre dentro del proceso).
+La primera ejecución desde cero (incluyendo la descarga de los tres archivos desde la TLC) tardó
+**44,1 s** en total (**20,2 s** de ingesta, pico de RAM **2,16 GB**).
 
 Máquina de medición: AMD Ryzen 3 7320U with Radeon Graphics, 4 nucleos
 
@@ -266,11 +267,10 @@ docs/        exploracion.md (hallazgos de los datos) e interpretaciones.yaml
 
 ## 8. Declaración de uso de IA
 
-<<REVISAR Y AJUSTAR A LO QUE REALMENTE HICISTE>>
-
-Usé CLOUDE en el desarrollo para: entender los conceptos (Parquet,
+Usé CLAUDE en el desarrollo para: entender los conceptos (Parquet,
 idempotencia, particionado, modelo dimensional, calidad de datos), armar el plan de trabajo, redactar
-código base de los módulos y de los tests, interpretar mensajes de error y revisar resultados. Yo definí
-las decisiones del pipeline a partir de mi propia exploración de los datos (umbrales, severidades,
-tratamiento de nulos, NULL en `cbd_congestion_fee`), ejecuté y verifiqué cada etapa en mi máquina,
-corregí los errores que aparecieron y redacté las interpretaciones de `RESULTADOS.md`. 
+código base de los módulos y de los tests, interpretar mensajes de error y revisar resultados, y
+Antigravity para la auditoría final contra la consigna, correcciones menores y verificación de la
+ejecución limpia. Yo definí las decisiones del pipeline a partir de mi propia exploración de los datos
+(umbrales, severidades, tratamiento de nulos, NULL en `cbd_congestion_fee`), ejecuté y verifiqué cada
+etapa en mi máquina, corregí los errores que aparecieron y redacté las interpretaciones de `RESULTADOS.md`.

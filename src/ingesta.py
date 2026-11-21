@@ -34,12 +34,12 @@ def es_transitorio(exc):
 
 
 def descargar(url, destino, reintentos=3):
-    """Descarga a un .part y lo renombra al terminar. Reintenta con espera creciente."""
+    """Descarga a un .part y lo renombra al terminar. Hasta 3 reintentos con espera creciente."""
     destino = Path(destino)
     espera = 2
-    for intento in range(1, reintentos + 1):
+    for intento in range(reintentos + 1):
+        tmp = destino.with_suffix(destino.suffix + ".part")
         try:
-            tmp = destino.with_suffix(destino.suffix + ".part")
             with requests.get(url, stream=True, timeout=60) as r:
                 r.raise_for_status()
                 with open(tmp, "wb") as f:
@@ -48,9 +48,10 @@ def descargar(url, destino, reintentos=3):
             tmp.replace(destino)
             return
         except Exception as exc:
+            tmp.unlink(missing_ok=True)
             if not es_transitorio(exc) or intento == reintentos:
                 raise
-            print(f"Intento {intento} falló ({exc}). Reintento en {espera}s...")
+            print(f"Intento {intento + 1} falló ({exc}). Reintento {intento + 1}/{reintentos} en {espera}s...")
             time.sleep(espera)
             espera *= 2
 

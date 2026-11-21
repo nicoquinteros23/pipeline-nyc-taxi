@@ -21,7 +21,7 @@ WITH base AS (
   SELECT *,
          date_diff('second', tpep_pickup_datetime, tpep_dropoff_datetime) / 60.0
            AS trip_duration_min
-  FROM read_parquet('{val}')
+  FROM read_parquet('{val}', hive_partitioning = false)
 ),
 zonas AS (
   SELECT LocationID AS location_id, Borough AS borough, Zone AS zone

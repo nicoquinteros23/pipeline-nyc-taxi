@@ -97,7 +97,7 @@ por_zona AS (
          round(100.0 * avg(CAST(b.con_cargo AS INTEGER)), 2) AS pct_zona_con_cargo
   FROM base b
   JOIN dim_zone z ON z.location_id = b.pu_location_id
-  GROUP BY z.zone
+  GROUP BY b.pu_location_id, z.zone
   HAVING count(*) >= 1000
 )
 SELECT p.zona, p.viajes, p.pct_zona_con_cargo, t.pct_con_cargo_en_el_mes, t.viajes_del_mes

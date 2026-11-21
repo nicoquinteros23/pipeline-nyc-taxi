@@ -33,7 +33,7 @@ Generado con scripts/explorar.py y scripts/explorar2.py.
   del conductor. Por eso la regla de pasajeros es advertencia.
 - El aumento de bajada <= subida (1.128 a 22.280) se debe al VendorID 7, nuevo en
   2025: 21.481 filas con bajada igual a la subida (96 % del total).
-  Viajes totales del VendorID 7:  Viajes totales del VendorID 7: 21.481, y los 21.481 (100 %) tienen bajada igual
+  Viajes totales del VendorID 7: 21.481, y los 21.481 (100 %) tienen bajada igual
   a la subida. El VendorID 6 tiene 334 viajes y 76 (23 %) con bajada no posterior.
   Los VendorID 1 y 2 tienen 630 de 834.394 y 93 de 3.289.048 respectivamente.
 - El VendorID 6 concentra las bajadas anteriores a la subida (73 en 2025, 97 en 2024).
