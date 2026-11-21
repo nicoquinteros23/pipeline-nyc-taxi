@@ -206,4 +206,4 @@ FROM m;
 |---|---|---|---|---|---|
 | 3,453,562 | 3,955,293 | 14.53 | 19.06 | 18.4 | -3.47 |
 
-**Interpretación:** pendiente
+**Interpretación:** Los viajes aceptados subieron 14,53 % (3.453.562 a 3.955.293) y la tarifa media bajó 3,47 % (USD 19,06 a 18,40). Hipótesis: la baja es un efecto de composición y no un abaratamiento: los viajes con tarifa menor o igual a 0 pasaron de 0,43 % a 3,26 % del total, casi todos con payment_type 0 (Flex Fare, que pasó de 379.418 a 854.427 viajes), y la tarifa media de los viajes con tarifa positiva casi no cambió (USD 19,15 a 19,16).
