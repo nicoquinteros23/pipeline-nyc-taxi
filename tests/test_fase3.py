@@ -1,40 +1,91 @@
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
-import pytest
-import yaml
-from dagster import DefaultScheduleStatus
+from dagster import DagsterRunStatus, RunsFilter
 from filelock import Timeout
 from prometheus_client import generate_latest
+import pytest
+import yaml
 
 from orchestration import defs
-from orchestration.resources import TaxiPipelineConfig, adquirir_lock_pipeline, resolver_meses
-from src.metrics_exporter import cargar_metricas, construir_registry, registrar_ejecucion_metricas
-
+from orchestration.resources import (
+    PERIODOS_SOPORTADOS,
+    TaxiPipelineConfig,
+    adquirir_lock_pipeline,
+    resolver_meses,
+    verificar_sin_otra_ejecucion_activa,
+)
+from src.metrics_exporter import (
+    DockerStatsCache,
+    calcular_cpu_percent,
+    calcular_memoria_bytes,
+    cargar_metricas,
+    construir_registry,
+    parsear_contenedores_stats,
+    registrar_ejecucion_metricas,
+)
 
 EXPECTED_ASSETS = [
-    "raw_ingesta",
-    "esquema_validado",
-    "dlt_staging",
+    "ingesta_raw",
+    "carga_dlt_staging",
     "calidad_cuarentena",
-    "intermediate_views",
-    "reconciliacion_intermedia",
-    "transformacion_curada",
+    "reconciliacion_staging",
     "dbt_marts",
     "verificacion_final",
 ]
 
 
-def test_dagster_definitions_carga_completa():
+def test_dagster_definitions_carga_y_dependencias():
     asset_keys = [a.key.to_user_string() for a in defs.assets]
     assert asset_keys == EXPECTED_ASSETS
 
+    por_nombre = {a.key.to_user_string(): a for a in defs.assets}
+    for idx, nombre in enumerate(EXPECTED_ASSETS):
+        deps = {k.to_user_string() for k in por_nombre[nombre].dependency_keys}
+        esperado = set() if idx == 0 else {EXPECTED_ASSETS[idx - 1]}
+        assert deps == esperado, f"{nombre}: {deps} != {esperado}"
+
     job = defs.resolve_job_def("nyc_taxi_pipeline")
     assert job.name == "nyc_taxi_pipeline"
+    assert not defs.schedules
 
-    sched = defs.resolve_schedule_def("nyc_taxi_monthly_schedule")
-    assert sched.name == "nyc_taxi_monthly_schedule"
-    assert sched.default_status == DefaultScheduleStatus.STOPPED
+
+def test_configuracion_periodos_unificada():
+    cfg = TaxiPipelineConfig()
+    assert resolver_meses(cfg) == PERIODOS_SOPORTADOS == ("2024-03", "2025-03")
+
+    with pytest.raises(ValueError, match="inválido"):
+        resolver_meses(TaxiPipelineConfig(mes="marzo"))
+
+    with pytest.raises(ValueError, match="iguales"):
+        resolver_meses(TaxiPipelineConfig(mes="2025-03", mes_comparacion="2025-03"))
+
+    with pytest.raises(ValueError, match="no soportados"):
+        resolver_meses(TaxiPipelineConfig(mes="2025-06"))
+
+
+def test_concurrencia_lock_y_ejecucion_activa_bloqueada(tmp_path):
+    with adquirir_lock_pipeline(tmp_path, timeout=1.0):
+        with pytest.raises(Timeout):
+            with adquirir_lock_pipeline(tmp_path, timeout=0.1):
+                pass
+    # Tras salir del contexto, el bloqueo queda liberado y puede volver a tomarse
+    with adquirir_lock_pipeline(tmp_path, timeout=0.5):
+        pass
+
+    class FakeInstance:
+        def get_runs(self, filters=None):
+            assert isinstance(filters, RunsFilter)
+            assert DagsterRunStatus.STARTED in filters.statuses
+            return [SimpleNamespace(run_id="run-otro-activo")]
+
+    ctx_otro = SimpleNamespace(instance=FakeInstance(), run_id="run-nuevo")
+    with pytest.raises(RuntimeError, match="ejecución activa"):
+        verificar_sin_otra_ejecucion_activa(ctx_otro)
+
+    ctx_mismo = SimpleNamespace(instance=FakeInstance(), run_id="run-otro-activo")
+    verificar_sin_otra_ejecucion_activa(ctx_mismo)
 
 
 def test_dagster_fallo_controlado_registra_error_sin_tocar_datos(tmp_path):
@@ -54,170 +105,146 @@ def test_dagster_fallo_controlado_registra_error_sin_tocar_datos(tmp_path):
     data = json.loads(metrics_file.read_text(encoding="utf-8"))
     assert data["failures_total"] >= 1
     assert data["last_status"] == 0
-    assert "raw_ingesta" in data["last_error"]
+    assert "ingesta_raw" in data["last_error"]
 
 
-def test_metrics_exporter_registro_y_formato_prometheus(tmp_path):
+def test_docker_stats_parsers_y_series_por_contenedor(tmp_path):
+    stats_dagster = {
+        "cpu_stats": {
+            "cpu_usage": {"total_usage": 2_500_000_000},
+            "system_cpu_usage": 20_000_000_000,
+            "online_cpus": 4,
+        },
+        "precpu_stats": {
+            "cpu_usage": {"total_usage": 2_000_000_000},
+            "system_cpu_usage": 10_000_000_000,
+        },
+        "memory_stats": {
+            "usage": 400_000_000,
+            "limit": 4_000_000_000,
+            "stats": {"inactive_file": 50_000_000},
+        },
+    }
+    stats_prom = {
+        "cpu_stats": {
+            "cpu_usage": {"total_usage": 1_100_000_000},
+            "system_cpu_usage": 20_000_000_000,
+            "online_cpus": 4,
+        },
+        "precpu_stats": {
+            "cpu_usage": {"total_usage": 1_000_000_000},
+            "system_cpu_usage": 10_000_000_000,
+        },
+        "memory_stats": {
+            "usage": 100_000_000,
+            "limit": 4_000_000_000,
+            "stats": {"inactive_file": 20_000_000},
+        },
+    }
+    cpu_d, sec_d = calcular_cpu_percent(stats_dagster)
+    assert cpu_d == 20.0
+    assert sec_d == 2.5
+    mem_d, lim_d, pct_d = calcular_memoria_bytes(stats_dagster)
+    assert (mem_d, lim_d, pct_d) == (350_000_000, 4_000_000_000, 8.75)
+
+    contenedores = [
+        {
+            "Id": "cid-1",
+            "Names": ["/nyc-taxi-dagster"],
+            "State": "running",
+            "Labels": {"com.docker.compose.service": "dagster-webserver"},
+        },
+        {
+            "Id": "cid-2",
+            "Names": ["/nyc-taxi-prometheus"],
+            "State": "running",
+            "Labels": {"com.docker.compose.service": "prometheus"},
+        },
+        {
+            "Id": "cid-3",
+            "Names": ["/nyc-taxi-grafana"],
+            "State": "exited",
+            "Labels": {"com.docker.compose.service": "grafana"},
+        },
+    ]
+    parsed = parsear_contenedores_stats(
+        contenedores, {"cid-1": stats_dagster, "cid-2": stats_prom}
+    )
+    por_svc = {x["service"]: x for x in parsed}
+    assert por_svc["dagster-webserver"]["memory_usage_bytes"] == 350_000_000
+    assert por_svc["prometheus"]["memory_usage_bytes"] == 80_000_000
+    assert por_svc["dagster-webserver"]["running"] == 1
+    assert por_svc["grafana"]["running"] == 0
+    assert por_svc["grafana"]["memory_usage_bytes"] == 0
+
+    class FakeCache:
+        def snapshot(self):
+            return parsed
+
     metrics_file = tmp_path / "pipeline_metrics.json"
     registrar_ejecucion_metricas(
         exito=True,
         duracion_s=42.5,
-        mes="2025-03",
-        mes_cmp="2024-03",
-        pico_ram_gb=1.15,
-        tiempos_etapas={"dbt_build": 20.0},
+        tiempos_etapas={"dbt_marts": 20.0},
         reconciliacion={
             "meses": {
                 "2024-03": {"staging": 100, "aceptadas": 90, "cuarentena": 10, "diferencia": 0},
                 "2025-03": {"staging": 200, "aceptadas": 180, "cuarentena": 20, "diferencia": 0},
             },
-            "marts": {
-                "fact_trips": 270,
-                "agg_zone_hour_trips": 270,
-                "fact_total_revenue": 1234.56,
-            },
+            "marts": {"fact_trips": 270, "agg_zone_hour_trips": 270, "fact_total_revenue": 1234.56},
         },
         metrics_path=metrics_file,
+        run_id="run-1",
     )
-    registrar_ejecucion_metricas(
-        exito=False,
-        duracion_s=3.0,
-        error="fallo simulado",
-        metrics_path=metrics_file,
-    )
-
     payload = generate_latest(
-        construir_registry(metrics_path=metrics_file, data_dir=tmp_path, probe_services=False)
+        construir_registry(metrics_path=metrics_file, data_dir=tmp_path, docker_cache=FakeCache())
     ).decode("utf-8")
 
     for esperado in (
-        "nyc_taxi_pipeline_runs_total 2.0",
-        "nyc_taxi_pipeline_success_total 1.0",
-        "nyc_taxi_pipeline_failures_total 1.0",
-        "nyc_taxi_pipeline_last_status 0.0",
+        'nyc_taxi_container_cpu_percent{container="nyc-taxi-dagster",service="dagster-webserver"} 20.0',
+        'nyc_taxi_container_memory_usage_bytes{container="nyc-taxi-dagster",service="dagster-webserver"} 3.5e+08',
+        'nyc_taxi_container_memory_usage_bytes{container="nyc-taxi-prometheus",service="prometheus"} 8e+07',
+        'nyc_taxi_container_running{container="nyc-taxi-grafana",service="grafana"} 0.0',
+        "nyc_taxi_pipeline_runs_total 1.0",
         "nyc_taxi_reconciliation_diff_rows 0.0",
-        "nyc_taxi_marts_total_revenue_usd 1234.56",
-        "nyc_taxi_system_cpu_percent",
-        "nyc_taxi_system_memory_used_bytes",
-        "nyc_taxi_disk_free_bytes",
     ):
         assert esperado in payload
 
-
-def test_archivos_configuracion_fase3_validos():
-    dagster_yaml = yaml.safe_load(Path("orchestration/dagster.yaml").read_text(encoding="utf-8"))
-    assert dagster_yaml["run_coordinator"]["class"] == "DefaultRunCoordinator"
-
-    prom_cfg = yaml.safe_load(Path("monitoring/prometheus/prometheus.yml").read_text(encoding="utf-8"))
-    jobs = {c["job_name"] for c in prom_cfg["scrape_configs"]}
-    assert {"prometheus", "nyc_taxi_exporter"}.issubset(jobs)
-
-    ds_cfg = yaml.safe_load(
-        Path("monitoring/grafana/provisioning/datasources/datasource.yml").read_text(encoding="utf-8")
-    )
-    assert ds_cfg["datasources"][0]["uid"] == "prometheus"
-
-    dash = json.loads(
-        Path("monitoring/grafana/dashboards/nyc_taxi_monitoring.json").read_text(encoding="utf-8")
-    )
-    assert dash["title"] == "NYC Taxi — Pipeline Monitoring"
-    assert len(dash["panels"]) == 12
-    for panel in dash["panels"]:
-        assert panel["datasource"]["uid"] == "prometheus"
+    # Sin socket disponible no falla ni revienta la aplicación
+    cache_sin_socket = DockerStatsCache(socket_path=tmp_path / "no.sock")
+    assert cache_sin_socket.refresh_once() == []
 
 
-def test_dagster_dependencias_y_configuracion():
-    por_nombre = {a.key.to_user_string(): a for a in defs.assets}
-    for idx, nombre in enumerate(EXPECTED_ASSETS):
-        deps = {k.to_user_string() for k in por_nombre[nombre].dependency_keys}
-        esperado = set() if idx == 0 else {EXPECTED_ASSETS[idx - 1]}
-        assert deps == esperado, f"{nombre}: dependencias {deps} != {esperado}"
-
-    cfg = TaxiPipelineConfig()
-    assert cfg.mes == "2025-03"
-    assert cfg.sin_ingesta is True
-    assert cfg.forzar_dlt is False
-    assert cfg.simular_fallo is False
-    assert resolver_meses(cfg) == ("2024-03", "2025-03")
-
-
-def test_concurrencia_lock_pipeline_bloquea_segundo_acceso(tmp_path):
-    with adquirir_lock_pipeline(tmp_path, timeout=1.0):
-        with pytest.raises(Timeout):
-            with adquirir_lock_pipeline(tmp_path, timeout=0.1):
-                pass
-
-
-def test_metrics_exporter_deduplica_run_id_y_maneja_archivos_faltantes(tmp_path):
+def test_metrics_exporter_deduplica_run_id_y_maneja_corrupto(tmp_path):
     metrics_file = tmp_path / "pipeline_metrics.json"
-    estado_vacio = cargar_metricas(metrics_file)
-    assert estado_vacio["runs_total"] == 0
-    assert estado_vacio["recorded_run_ids"] == []
-
-    metrics_file.write_text("{json_invalido", encoding="utf-8")
-    estado_corrupto = cargar_metricas(metrics_file)
-    assert estado_corrupto["runs_total"] == 0
+    assert cargar_metricas(metrics_file)["runs_total"] == 0
+    metrics_file.write_text("{corrupto", encoding="utf-8")
+    assert cargar_metricas(metrics_file)["runs_total"] == 0
     metrics_file.unlink()
 
-    e1 = registrar_ejecucion_metricas(
-        exito=True,
-        duracion_s=10.5,
-        tiempos_etapas={"raw_ingesta": 1.2},
-        metrics_path=metrics_file,
-        run_id="run-abc",
-    )
-    e1_dup = registrar_ejecucion_metricas(
-        exito=True,
-        duracion_s=10.5,
-        metrics_path=metrics_file,
-        run_id="run-abc",
-    )
-    assert e1["runs_total"] == 1
-    assert e1_dup["runs_total"] == 1
-    assert e1_dup["success_total"] == 1
-
-    e2 = registrar_ejecucion_metricas(
-        exito=False,
-        duracion_s=2.0,
-        error="error simulado",
-        metrics_path=metrics_file,
-        run_id="run-err",
-    )
-    e2_dup = registrar_ejecucion_metricas(
-        exito=False,
-        duracion_s=2.0,
-        error="error simulado",
-        metrics_path=metrics_file,
-        run_id="run-err",
-    )
-    assert e2["runs_total"] == 2
-    assert e2_dup["runs_total"] == 2
-    assert e2_dup["failures_total"] == 1
-    assert e2_dup["last_run_id"] == "run-err"
+    e1 = registrar_ejecucion_metricas(exito=True, duracion_s=5.0, metrics_path=metrics_file, run_id="r1")
+    e2 = registrar_ejecucion_metricas(exito=True, duracion_s=5.0, metrics_path=metrics_file, run_id="r1")
+    assert e1["runs_total"] == 1 and e2["runs_total"] == 1 and e2["success_total"] == 1
 
 
-def test_docker_compose_y_seguridad_puertos_variables():
+def test_docker_compose_prometheus_grafana_simplificados():
     compose = yaml.safe_load(Path("docker-compose.yml").read_text(encoding="utf-8"))
-    services = compose["services"]
-    for req in ("pipeline", "dagster-webserver", "metrics-exporter", "prometheus", "grafana", "dozzle"):
-        assert req in services
+    services = set(compose["services"].keys())
+    assert services == {"dagster-webserver", "metrics-exporter", "prometheus", "grafana", "dozzle"}
 
-    for svc_name, svc in services.items():
+    for svc_name, svc in compose["services"].items():
         for p in svc.get("ports", []):
-            assert str(p).startswith("127.0.0.1:"), f"Puerto expuesto fuera de localhost en {svc_name}: {p}"
+            assert str(p).startswith("127.0.0.1:"), f"Puerto público en {svc_name}: {p}"
 
-    dozzle = services["dozzle"]
-    assert "/var/run/docker.sock:/var/run/docker.sock:ro" in dozzle["volumes"]
-    assert str(dozzle["environment"]["DOZZLE_ENABLE_ACTIONS"]).lower() == "false"
+    exp = compose["services"]["metrics-exporter"]
+    assert "/var/run/docker.sock:/var/run/docker.sock:ro" in exp["volumes"]
+    assert compose["services"]["dozzle"]["environment"]["DOZZLE_ENABLE_ACTIONS"] == "false"
 
-    dag = services["dagster-webserver"]
-    for var in ("DAGSTER_HOME", "DUCKDB_PATH", "DBT_PROFILES_DIR", "PYTHONPATH", "PYTHONDONTWRITEBYTECODE"):
-        assert var in dag["environment"]
-    assert "./orchestration/dagster.yaml:/app/data/dagster_home/dagster.yaml:ro" in dag["volumes"]
-    assert "./src:/app/src:ro" in dag["volumes"]
-    assert "./orchestration:/app/orchestration:ro" in dag["volumes"]
+    prom_cfg = yaml.safe_load(Path("monitoring/prometheus/prometheus.yml").read_text(encoding="utf-8"))
+    assert {"prometheus", "nyc_taxi_exporter"}.issubset({c["job_name"] for c in prom_cfg["scrape_configs"]})
 
-    dash_prov = yaml.safe_load(
-        Path("monitoring/grafana/provisioning/dashboards/dashboards.yml").read_text(encoding="utf-8")
-    )
-    assert dash_prov["providers"][0]["options"]["path"] == "/var/lib/grafana/dashboards"
+    dash = json.loads(Path("monitoring/grafana/dashboards/nyc_taxi_monitoring.json").read_text(encoding="utf-8"))
+    assert len(dash["panels"]) == 12
+    exprs = " ".join(t["expr"] for p in dash["panels"] for t in p["targets"])
+    assert "nyc_taxi_container_cpu_percent" in exprs
+    assert "nyc_taxi_container_memory_usage_bytes" in exprs

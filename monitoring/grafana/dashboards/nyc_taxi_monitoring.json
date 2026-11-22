@@ -107,10 +107,10 @@
       "id": 7,
       "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
       "targets": [
-        { "expr": "up", "legendFormat": "scrape:{{job}}", "refId": "A" },
-        { "expr": "nyc_taxi_service_up", "legendFormat": "http:{{service}}", "refId": "B" }
+        { "expr": "nyc_taxi_container_running", "legendFormat": "{{service}}", "refId": "A" },
+        { "expr": "up", "legendFormat": "scrape:{{job}}", "refId": "B" }
       ],
-      "title": "Disponibilidad de Servicios y Endpoints",
+      "title": "Estado de Contenedores y Targets",
       "type": "stat"
     },
     {
@@ -125,39 +125,37 @@
     },
     {
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": { "defaults": { "unit": "percent", "min": 0, "max": 100 }, "overrides": [] },
-      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 9 },
+      "fieldConfig": { "defaults": { "unit": "percent", "min": 0 }, "overrides": [] },
+      "gridPos": { "h": 7, "w": 9, "x": 0, "y": 9 },
       "id": 9,
       "targets": [
-        { "expr": "nyc_taxi_system_cpu_percent", "legendFormat": "CPU Sistema / Contenedor (%)", "refId": "A" },
-        { "expr": "rate(process_cpu_seconds_total[1m]) * 100", "legendFormat": "CPU Proceso {{job}} (%)", "refId": "B" }
+        { "expr": "nyc_taxi_container_cpu_percent", "legendFormat": "{{service}} ({{container}})", "refId": "A" }
       ],
-      "title": "Consumo de CPU (%)",
+      "title": "CPU por Contenedor Docker (%)",
       "type": "timeseries"
     },
     {
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": { "defaults": { "unit": "bytes" }, "overrides": [] },
-      "gridPos": { "h": 7, "w": 8, "x": 8, "y": 9 },
+      "fieldConfig": { "defaults": { "unit": "bytes", "min": 0 }, "overrides": [] },
+      "gridPos": { "h": 7, "w": 9, "x": 9, "y": 9 },
       "id": 10,
       "targets": [
-        { "expr": "nyc_taxi_system_memory_used_bytes", "legendFormat": "RAM en uso (VM/Host)", "refId": "A" },
-        { "expr": "nyc_taxi_system_memory_available_bytes", "legendFormat": "RAM disponible", "refId": "B" },
-        { "expr": "nyc_taxi_pipeline_peak_ram_bytes", "legendFormat": "Pico RAM último pipeline", "refId": "C" }
+        { "expr": "nyc_taxi_container_memory_usage_bytes", "legendFormat": "{{service}} ({{container}})", "refId": "A" }
       ],
-      "title": "Uso de Memoria RAM del Entorno y Pipeline",
+      "title": "Memoria RAM por Contenedor Docker",
       "type": "timeseries"
     },
     {
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": { "defaults": { "unit": "bytes" }, "overrides": [] },
-      "gridPos": { "h": 7, "w": 8, "x": 16, "y": 9 },
+      "fieldConfig": { "defaults": { "unit": "bytes", "min": 0 }, "overrides": [] },
+      "gridPos": { "h": 7, "w": 6, "x": 18, "y": 9 },
       "id": 11,
+      "options": { "orientation": "horizontal", "showValue": "always", "displayMode": "gradient" },
       "targets": [
-        { "expr": "process_resident_memory_bytes", "legendFormat": "RSS {{job}}", "refId": "A" }
+        { "expr": "nyc_taxi_container_memory_usage_bytes", "legendFormat": "{{service}}", "refId": "A" }
       ],
-      "title": "Memoria RSS de Contenedores Instrumentados",
-      "type": "timeseries"
+      "title": "RAM Actual por Contenedor",
+      "type": "bargauge"
     },
     {
       "datasource": { "type": "prometheus", "uid": "prometheus" },
@@ -168,17 +166,17 @@
       "targets": [
         { "expr": "nyc_taxi_pipeline_stage_duration_seconds", "legendFormat": "{{stage}}", "refId": "A" }
       ],
-      "title": "Duración por Etapa (última corrida)",
+      "title": "Duración por Etapa Dagster (última corrida)",
       "type": "bargauge"
     }
   ],
   "refresh": "5s",
   "schemaVersion": 39,
-  "tags": ["nyc-taxi", "dagster", "prometheus"],
+  "tags": ["nyc-taxi", "dagster", "prometheus", "docker"],
   "templating": { "list": [] },
   "time": { "from": "now-30m", "to": "now" },
   "timezone": "browser",
   "title": "NYC Taxi — Pipeline Monitoring",
   "uid": "nyc-taxi-monitoring",
-  "version": 1
+  "version": 2
 }

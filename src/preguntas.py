@@ -5,9 +5,11 @@ from pathlib import Path
 import duckdb
 import yaml
 
-from src.modelo import ruta_warehouse
-
 SIN_SEPARADOR = {"anio", "hora", "puesto", "tipo_pago"}   # identificadores, no cantidades
+
+
+def ruta_warehouse(base_dir: Path = Path("data")) -> Path:
+    return Path(base_dir) / "warehouse" / "nyc_taxi_dlt.duckdb"
 
 
 def _formato(valor, columna=""):
@@ -36,30 +38,34 @@ def ejecutar(mes, mes_cmp, base_dir=Path("data"), sql_dir=Path("sql"),
         textos = yaml.safe_load(Path(interpretaciones).read_text(encoding="utf-8")) or {}
 
     con = duckdb.connect(str(ruta_warehouse(Path(base_dir))), read_only=True)
-    partes = [f"# Resultados: {mes} vs {mes_cmp}", "",
-              "Generado automáticamente por `src/preguntas.py` sobre el modelo estrella. "
-              "Los números corresponden a viajes **aceptados** (después de la cuarentena).", ""]
-    for archivo in sorted(Path(sql_dir).glob("q*.sql")):
-        sql = archivo.read_text(encoding="utf-8")
-        for marcador, valor in marcadores.items():
-            sql = sql.replace(marcador, valor)
-        titulo = sql.splitlines()[0].lstrip("- ").strip()
-        cur = con.execute(sql)
-        columnas = [d[0] for d in cur.description]
-        filas = cur.fetchall()
-        clave = archivo.stem.split("_")[0]
-        partes += [f"## {titulo}", "", f"Consulta: `sql/{archivo.name}`", "",
-                   "```sql", sql.strip(), "```", "", _tabla_md(columnas, filas), "",
-                   f"**Interpretación:** {textos.get(clave) or '(pendiente)'}", ""]
-    con.close()
+    try:
+        con.execute("SET memory_limit = '1.5GB'")
+        con.execute("SET search_path = 'marts,main'")
+        partes = [f"# Resultados: {mes} vs {mes_cmp}", "",
+                  "Generado por `src/preguntas.py` sobre el esquema `marts` de `nyc_taxi_dlt.duckdb`. "
+                  "Los números corresponden a viajes **aceptados** (después de la cuarentena).", ""]
+        for archivo in sorted(Path(sql_dir).glob("q*.sql")):
+            sql = archivo.read_text(encoding="utf-8")
+            for marcador, valor in marcadores.items():
+                sql = sql.replace(marcador, valor)
+            titulo = sql.splitlines()[0].lstrip("- ").strip()
+            cur = con.execute(sql)
+            columnas = [d[0] for d in cur.description]
+            filas = cur.fetchall()
+            clave = archivo.stem.split("_")[0]
+            partes += [f"## {titulo}", "", f"Consulta: `sql/{archivo.name}`", "",
+                       "```sql", sql.strip(), "```", "", _tabla_md(columnas, filas), "",
+                       f"**Interpretación:** {textos.get(clave) or '(pendiente)'}", ""]
+    finally:
+        con.close()
     Path(salida).write_text("\n".join(partes), encoding="utf-8")
     return Path(salida)
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Responde las 6 preguntas y escribe RESULTADOS.md")
-    ap.add_argument("--mes", required=True)
-    ap.add_argument("--mes-comparacion", required=True)
+    ap = argparse.ArgumentParser(description="Responde las 6 preguntas sobre marts y escribe RESULTADOS.md")
+    ap.add_argument("--mes", default="2025-03")
+    ap.add_argument("--mes-comparacion", default="2024-03")
     args = ap.parse_args()
     try:
         ruta = ejecutar(args.mes, args.mes_comparacion)

@@ -101,8 +101,8 @@ def registrar_fallo_pipeline(context: HookContext) -> None:
 nyc_taxi_pipeline = define_asset_job(
     name="nyc_taxi_pipeline",
     description=(
-        "Ejecuta en serie las 9 etapas de Fase 2 (ingesta -> esquema -> dlt -> calidad -> "
-        "intermediate -> reconciliación -> transformación -> dbt build -> verificación final) "
+        "Ejecuta en serie las 6 etapas oficiales (ingesta_raw -> carga_dlt_staging -> "
+        "calidad_cuarentena -> reconciliacion_staging -> dbt_marts -> verificacion_final) "
         "protegiendo DuckDB y el límite de 8 GB de RAM."
     ),
     selection=AssetSelection.all(),

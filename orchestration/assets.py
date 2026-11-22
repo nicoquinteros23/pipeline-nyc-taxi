@@ -1,4 +1,4 @@
-"""Assets de Dagster que envuelven las etapas reales de Fase 2 sin duplicar lógica."""
+"""Assets de Dagster del flujo único oficial NYC Taxi (6 etapas)."""
 
 import time
 from pathlib import Path
@@ -8,26 +8,27 @@ from dagster import AssetExecutionContext, MetadataValue, Output, asset
 from orchestration.resources import (
     TaxiPipelineConfig,
     adquirir_lock_pipeline,
+    ejecutar_dbt,
     resolver_meses,
     ruta_warehouse,
+    verificar_sin_otra_ejecucion_activa,
 )
 from src.calidad import procesar_mes
 from src.carga_dlt import cargar_mes
 from src.esquema import validar_mes
 from src.ingesta import ingestar, ingestar_zonas
 from src.intermediate import crear_intermediate
-from src.pipeline_fase2 import ejecutar_dbt
 from src.reconciliacion import imprimir_resumen, reconciliar_fase2
-from src.transformacion import transformar_mes
 
 
 @asset(
     group_name="ingesta",
-    description="Ingesta idempotente (o verificación local) de Parquet raw y tabla de zonas.",
+    description="Ingesta idempotente (o verificación local) y validación de esquema contra contrato YAML.",
 )
-def raw_ingesta(
+def ingesta_raw(
     context: AssetExecutionContext, config: TaxiPipelineConfig
 ) -> Output[dict]:
+    verificar_sin_otra_ejecucion_activa(context)
     if config.simular_fallo:
         raise RuntimeError(
             "Fallo controlado de prueba en Dagster (simular_fallo=True); no se alteraron datos reales."
@@ -35,6 +36,7 @@ def raw_ingesta(
 
     t0 = time.perf_counter()
     base_dir = Path(config.base_dir)
+    reports_dir = Path(config.reports_dir)
     mes_cmp, mes = resolver_meses(config)
     meses = (mes_cmp, mes)
 
@@ -52,46 +54,21 @@ def raw_ingesta(
             if not raw.is_file():
                 raise FileNotFoundError(f"Falta archivo raw: {raw}")
 
+    estados_esquema = {m: validar_mes(m, base_dir=base_dir, reports_dir=reports_dir)["estado"] for m in meses}
     dur = round(time.perf_counter() - t0, 2)
-    context.log.info(f"raw_ingesta OK para {meses} (sin_ingesta={config.sin_ingesta}) en {dur}s")
+    context.log.info(f"ingesta_raw OK para {meses} (esquema={estados_esquema}) en {dur}s")
     return Output(
-        {"meses": list(meses), "sin_ingesta": config.sin_ingesta, "duracion_s": dur},
-        metadata={"meses": str(meses), "sin_ingesta": config.sin_ingesta, "duracion_s": dur},
+        {"meses": list(meses), "esquema": estados_esquema, "duracion_s": dur},
+        metadata={"meses": str(meses), "esquema": MetadataValue.json(estados_esquema), "duracion_s": dur},
     )
 
 
 @asset(
-    deps=[raw_ingesta],
-    group_name="validacion",
-    description="Valida el esquema real de cada Parquet contra contracts/yellow_schema.yaml.",
-)
-def esquema_validado(
-    context: AssetExecutionContext, config: TaxiPipelineConfig
-) -> Output[dict]:
-    t0 = time.perf_counter()
-    base_dir = Path(config.base_dir)
-    reports_dir = Path(config.reports_dir)
-    meses = resolver_meses(config)
-
-    estados = {}
-    for m in meses:
-        res = validar_mes(m, base_dir=base_dir, reports_dir=reports_dir)
-        estados[m] = res["estado"]
-
-    dur = round(time.perf_counter() - t0, 2)
-    context.log.info(f"esquema_validado OK: {estados} en {dur}s")
-    return Output(
-        {"estados": estados, "duracion_s": dur},
-        metadata={"estados": MetadataValue.json(estados), "duracion_s": dur},
-    )
-
-
-@asset(
-    deps=[esquema_validado],
+    deps=[ingesta_raw],
     group_name="staging",
-    description="Carga por lotes Arrow hacia DuckDB (esquema staging) usando dlt con idempotencia.",
+    description="Carga idempotente por lotes Arrow hacia DuckDB (esquema staging) con dlt.",
 )
-def dlt_staging(
+def carga_dlt_staging(
     context: AssetExecutionContext, config: TaxiPipelineConfig
 ) -> Output[dict]:
     t0 = time.perf_counter()
@@ -104,7 +81,7 @@ def dlt_staging(
             cargar_mes(m, base_dir=base_dir, warehouse_path=wh, forzar=config.forzar_dlt)
 
     dur = round(time.perf_counter() - t0, 2)
-    context.log.info(f"dlt_staging OK en {wh} en {dur}s")
+    context.log.info(f"carga_dlt_staging OK en {wh} en {dur}s")
     return Output(
         {"warehouse": wh.as_posix(), "meses": list(meses), "duracion_s": dur},
         metadata={"warehouse": wh.as_posix(), "duracion_s": dur},
@@ -112,9 +89,9 @@ def dlt_staging(
 
 
 @asset(
-    deps=[dlt_staging],
+    deps=[carga_dlt_staging],
     group_name="calidad",
-    description="Aplica las 11 reglas SQL de contracts/quality_rules.yaml y separa aceptadas/cuarentena.",
+    description="Aplica las 11 reglas de calidad, separa aceptadas/cuarentena y actualiza vistas intermediate.",
 )
 def calidad_cuarentena(
     context: AssetExecutionContext, config: TaxiPipelineConfig
@@ -122,6 +99,7 @@ def calidad_cuarentena(
     t0 = time.perf_counter()
     base_dir = Path(config.base_dir)
     reports_dir = Path(config.reports_dir)
+    wh = ruta_warehouse(base_dir)
     meses = resolver_meses(config)
 
     resumen = {}
@@ -134,49 +112,27 @@ def calidad_cuarentena(
                 "cuarentena": rep["cuarentena"],
                 "reconciliacion": rep["reconciliacion"],
             }
+        inter = crear_intermediate(meses=meses, base_dir=base_dir, warehouse_path=wh)
 
     dur = round(time.perf_counter() - t0, 2)
     context.log.info(f"calidad_cuarentena OK en {dur}s: {resumen}")
     return Output(
-        {"resumen": resumen, "duracion_s": dur},
-        metadata={"resumen": MetadataValue.json(resumen), "duracion_s": dur},
-    )
-
-
-@asset(
-    deps=[calidad_cuarentena],
-    group_name="intermediate",
-    description="Crea vistas portables en esquema intermediate sobre Parquet validados y cuarentena.",
-)
-def intermediate_views(
-    context: AssetExecutionContext, config: TaxiPipelineConfig
-) -> Output[dict]:
-    t0 = time.perf_counter()
-    base_dir = Path(config.base_dir)
-    wh = ruta_warehouse(base_dir)
-    meses = resolver_meses(config)
-
-    with adquirir_lock_pipeline(base_dir):
-        res = crear_intermediate(meses=meses, base_dir=base_dir, warehouse_path=wh)
-
-    dur = round(time.perf_counter() - t0, 2)
-    context.log.info(f"intermediate_views OK en {dur}s: {res}")
-    return Output(
-        {**res, "duracion_s": dur},
+        {"resumen": resumen, "intermediate": inter, "duracion_s": dur},
         metadata={
-            "total_aceptadas": res["total_aceptadas"],
-            "total_cuarentena": res["total_cuarentena"],
+            "resumen": MetadataValue.json(resumen),
+            "total_aceptadas": inter["total_aceptadas"],
+            "total_cuarentena": inter["total_cuarentena"],
             "duracion_s": dur,
         },
     )
 
 
 @asset(
-    deps=[intermediate_views],
+    deps=[calidad_cuarentena],
     group_name="calidad",
     description="Reconcilia staging (dlt) == aceptadas + cuarentena (intermediate) por mes y total.",
 )
-def reconciliacion_intermedia(
+def reconciliacion_staging(
     context: AssetExecutionContext, config: TaxiPipelineConfig
 ) -> Output[dict]:
     t0 = time.perf_counter()
@@ -201,33 +157,7 @@ def reconciliacion_intermedia(
 
 
 @asset(
-    deps=[reconciliacion_intermedia],
-    group_name="curated",
-    description="Genera capa curada Parquet Hive particionada con métricas derivadas y zonas.",
-)
-def transformacion_curada(
-    context: AssetExecutionContext, config: TaxiPipelineConfig
-) -> Output[dict]:
-    t0 = time.perf_counter()
-    base_dir = Path(config.base_dir)
-    meses = resolver_meses(config)
-
-    filas = {}
-    with adquirir_lock_pipeline(base_dir):
-        for m in meses:
-            r = transformar_mes(m, base_dir=base_dir)
-            filas[m] = r["filas"]
-
-    dur = round(time.perf_counter() - t0, 2)
-    context.log.info(f"transformacion_curada OK en {dur}s: {filas}")
-    return Output(
-        {"filas": filas, "duracion_s": dur},
-        metadata={"filas_curadas": MetadataValue.json(filas), "duracion_s": dur},
-    )
-
-
-@asset(
-    deps=[transformacion_curada],
+    deps=[reconciliacion_staging],
     group_name="dbt",
     description="Ejecuta dbt build (staging, intermediate, marts y 50 tests) sobre nyc_taxi_dlt.duckdb.",
 )
@@ -289,13 +219,10 @@ def verificacion_final(
 
 
 ALL_ASSETS = [
-    raw_ingesta,
-    esquema_validado,
-    dlt_staging,
+    ingesta_raw,
+    carga_dlt_staging,
     calidad_cuarentena,
-    intermediate_views,
-    reconciliacion_intermedia,
-    transformacion_curada,
+    reconciliacion_staging,
     dbt_marts,
     verificacion_final,
 ]
