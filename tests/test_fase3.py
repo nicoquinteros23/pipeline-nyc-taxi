@@ -2,13 +2,16 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
-from dagster import DagsterRunStatus, RunsFilter
+from dagster import DagsterInstance, DagsterRunStatus, RunsFilter
+from dagster._core.instance import InstanceRef
+import duckdb
 from filelock import Timeout
 from prometheus_client import generate_latest
 import pytest
 import yaml
 
 from orchestration import defs
+from orchestration.cli import ejecutar_cli
 from orchestration.resources import (
     TaxiPipelineConfig,
     adquirir_lock_ejecucion,
@@ -267,3 +270,66 @@ def test_docker_compose_prometheus_grafana_simplificados():
     exprs = " ".join(t["expr"] for p in dash["panels"] for t in p["targets"])
     assert "nyc_taxi_container_cpu_percent" in exprs
     assert "nyc_taxi_container_memory_usage_bytes" in exprs
+
+
+def test_cli_persiste_run_en_dagster_home(tmp_path):
+    base = tmp_path / "data"
+    zdir = base / "raw" / "zones"
+    zdir.mkdir(parents=True, exist_ok=True)
+    (zdir / "taxi_zone_lookup.csv").write_text(
+        "LocationID,Borough,Zone,service_zone\n"
+        "132,Queens,JFK Airport,Airports\n"
+        "161,Manhattan,Midtown Center,Yellow Zone\n",
+        encoding="utf-8",
+    )
+
+    for anio in (2024, 2025):
+        p = base / "raw" / "yellow" / f"year={anio}" / "month=06" / f"yellow_tripdata_{anio}-06.parquet"
+        p.parent.mkdir(parents=True, exist_ok=True)
+        with duckdb.connect() as con:
+            con.execute(
+                f"""
+                COPY (
+                  SELECT
+                    1::INTEGER AS VendorID,
+                    TIMESTAMP '{anio}-06-10 10:00:00' AS tpep_pickup_datetime,
+                    TIMESTAMP '{anio}-06-10 10:15:00' AS tpep_dropoff_datetime,
+                    1::BIGINT AS passenger_count,
+                    3.5::DOUBLE AS trip_distance,
+                    1::BIGINT AS RatecodeID,
+                    'N'::VARCHAR AS store_and_fwd_flag,
+                    161::INTEGER AS PULocationID,
+                    132::INTEGER AS DOLocationID,
+                    1::BIGINT AS payment_type,
+                    18.0::DOUBLE AS fare_amount,
+                    0.5::DOUBLE AS extra,
+                    0.5::DOUBLE AS mta_tax,
+                    3.0::DOUBLE AS tip_amount,
+                    0.0::DOUBLE AS tolls_amount,
+                    1.0::DOUBLE AS improvement_surcharge,
+                    23.0::DOUBLE AS total_amount,
+                    2.5::DOUBLE AS congestion_surcharge,
+                    0.0::DOUBLE AS Airport_fee
+                ) TO '{p.as_posix()}' (FORMAT PARQUET)
+                """
+            )
+
+    cfg = TaxiPipelineConfig(
+        mes="2025-06",
+        base_dir=str(base),
+        reports_dir=str(tmp_path / "reports"),
+        dbt_dir="dbt_project",
+        resultados_path=str(tmp_path / "RESULTADOS.md"),
+        sin_ingesta=True,
+    )
+    ok, meses, run_id = ejecutar_cli(cfg)
+    assert ok is True
+    assert meses == ("2024-06", "2025-06")
+
+    dagster_home = base / "dagster_home"
+    assert (dagster_home / "dagster.yaml").stat().st_size > 0
+    with DagsterInstance.from_ref(InstanceRef.from_dir(str(dagster_home))) as instance:
+        run = instance.get_run_by_id(run_id)
+        assert run is not None
+        assert run.status == DagsterRunStatus.SUCCESS
+        assert run.job_name == "nyc_taxi_pipeline"

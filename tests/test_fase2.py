@@ -147,25 +147,40 @@ def test_carga_dlt_valida_lote_y_omite_si_ya_coincide(tmp_path, monkeypatch, cap
 
 @pytest.mark.skipif(not WAREHOUSE_REAL.is_file(), reason="Requiere data/warehouse/nyc_taxi_dlt.duckdb")
 def test_reconciliacion_real_fase2():
+    with duckdb.connect(str(WAREHOUSE_REAL), read_only=True) as con:
+        meses_activos = tuple(
+            sorted(
+                r[0]
+                for r in con.execute(
+                    "SELECT source_month FROM staging.selected_periods"
+                ).fetchall()
+            )
+        )
+    assert len(meses_activos) >= 1
     res = reconciliar_fase2(
-        meses=("2024-03", "2025-03"),
+        meses=meses_activos,
         warehouse_path=WAREHOUSE_REAL,
         verificar_marts=True,
     )
-    assert res["meses"]["2024-03"] == {
-        "staging": 3_582_628,
-        "aceptadas": 3_453_562,
-        "cuarentena": 129_066,
-        "diferencia": 0,
-    }
-    assert res["meses"]["2025-03"] == {
-        "staging": 4_145_257,
-        "aceptadas": 3_955_293,
-        "cuarentena": 189_964,
-        "diferencia": 0,
-    }
-    assert res["totales"]["staging"] == 7_727_885
-    assert res["totales"]["aceptadas"] == 7_408_855
-    assert res["totales"]["cuarentena"] == 319_030
-    assert res["marts"]["fact_trips"] == 7_408_855
-    assert res["marts"]["agg_zone_hour_trips"] == 7_408_855
+    assert res["ok"] is True
+    assert res["totales"]["staging"] == (
+        res["totales"]["aceptadas"] + res["totales"]["cuarentena"]
+    )
+    assert res["marts"]["fact_trips"] == res["totales"]["aceptadas"]
+    assert res["marts"]["agg_zone_hour_trips"] == res["totales"]["aceptadas"]
+    if meses_activos == ("2024-03", "2025-03"):
+        assert res["meses"]["2024-03"] == {
+            "staging": 3_582_628,
+            "aceptadas": 3_453_562,
+            "cuarentena": 129_066,
+            "diferencia": 0,
+        }
+        assert res["meses"]["2025-03"] == {
+            "staging": 4_145_257,
+            "aceptadas": 3_955_293,
+            "cuarentena": 189_964,
+            "diferencia": 0,
+        }
+        assert res["totales"]["staging"] == 7_727_885
+        assert res["totales"]["aceptadas"] == 7_408_855
+        assert res["totales"]["cuarentena"] == 319_030

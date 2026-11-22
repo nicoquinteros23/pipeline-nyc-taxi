@@ -4,6 +4,7 @@ import argparse
 import gc
 from pathlib import Path
 import re
+import shutil
 
 import dlt
 from dlt.destinations.impl.duckdb.configuration import DuckDbCredentials
@@ -119,6 +120,10 @@ def cargar_mes(
     print(resultado)
     del pipeline
     gc.collect()
+    shutil.rmtree(
+        pipelines_dir / "nyc_taxi_staging" / "load" / "loaded",
+        ignore_errors=True,
+    )
 
     with duckdb.connect(
         str(warehouse),

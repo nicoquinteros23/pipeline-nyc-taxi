@@ -194,27 +194,12 @@ Dockerfile          docker-compose.yml  Makefile  requirements.txt  RESULTADOS.m
 - **Seguridad Docker:** todos los puertos escuchan en `127.0.0.1`. `/var/run/docker.sock` se monta en `:ro` únicamente en `metrics-exporter` y `dozzle` (`DOZZLE_ENABLE_ACTIONS=false`).
 - **Disponibilidad TLC y hardware:** los ejemplos futuros (como `2026-01` o `2026-10`) dependen de que los Parquet oficiales correspondan a meses ya publicados por NYC TLC y respeten `contracts/yellow_schema.yaml`. En equipos con 8 GB de RAM, evitar ejecutar corridas locales simultáneas con Docker Desktop cargado al límite de memoria virtual de Windows; usar `SIN_INGESTA=1` cuando se quiera trabajar sin acceso a red. `data/warehouse/taxi.duckdb` se conserva intacta sin dependencias activas. En marzo 2025, `VendorID = 7` (`21.481` filas) entra en cuarentena por `R02` (`bajada <= subida`) y `passenger_count = NULL` coincide 1:1 con `payment_type = 0` (`R06` marcada como advertencia).
 
-## Visualizar la ejecución en Dagster UI
+---
 
-1. **Iniciar Docker Desktop**
-   - Abra Docker Desktop manualmente (doble clic en el acceso directo) antes de cualquier comando. Mantenga la aplicación abierta; no la cierre al terminar la ejecución del pipeline.
-2. **Arrancar los servicios**
-   ```powershell
-   docker compose up -d dagster-webserver metrics-exporter prometheus grafana dozzle
-   ```
-   - El contenedor `nyc-taxi-dagster` expone la UI en el puerto **3000**.
-3. **Ejecutar el pipeline**
-   ```powershell
-   make dagster-run MES=2025-07
-   ```
-   - La ejecución se registra en la base interna de Dagster.
-4. **Abrir la UI**
-   - En su navegador, visite `http://127.0.0.1:3000`.
-   - Navegue a **Jobs → nyc_taxi_pipeline**.
-   - Verá la lista de ejecuciones recientes; haga clic en el ID (por ejemplo `15195d39‑3d0c‑4b36‑83ee‑e3770a7fbd14`) para inspeccionar los pasos y logs.
-5. **Problemas comunes**
-   - Si la UI no muestra la corrida, es probable que el contenedor `nyc-taxi-dagster` se haya detenido porque Docker Desktop se cerró al final del comando `make`. Asegúrese de que Docker Desktop siga activo o inicie el contenedor por separado antes de lanzar el pipeline.
-   - Use `docker compose ps` para confirmar que el contenedor está `healthy`.
-   - Puede verificar los logs con `docker logs nyc-taxi-dagster` si necesita más detalles.
+## 9. Visualizar ejecuciones en Dagster UI
 
-**Consejo:** Añada este paso al README bajo la sección "Instalación y arranque con Docker Compose" para que futuros usuarios sepan cómo visualizar las corridas.
+Tanto `make all MES=AAAA-MM` como `make dagster-run MES=AAAA-MM` registran cada corrida en la instancia persistente de Dagster ubicada en `data/dagster_home` (la misma que monta el contenedor `nyc-taxi-dagster`), de modo que las ejecuciones lanzadas por terminal aparecen en la UI web igual que las disparadas desde **Launchpad**:
+
+1. Asegúrate de tener los servicios levantados (`make up`) y en estado `healthy` (`make ps`).
+2. Ejecuta el pipeline desde terminal (`make all MES=2025-07` o `make dagster-run MES=2025-07`) o desde Dagster UI (**Jobs → `nyc_taxi_pipeline` → Launchpad**).
+3. Abre `http://127.0.0.1:3000` (o recarga la página) y ve a **Jobs → `nyc_taxi_pipeline` → Runs** para inspeccionar el estado, duración, logs por asset y materializaciones en **Catalog**.

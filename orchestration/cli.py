@@ -1,10 +1,25 @@
 """Adaptador CLI delgado que dispara el job oficial ``nyc_taxi_pipeline`` en Dagster."""
 
 import argparse
+from pathlib import Path
 import sys
+
+from dagster import DagsterInstance
+from dagster._core.instance import InstanceRef
 
 from orchestration import defs
 from orchestration.resources import TaxiPipelineConfig, liberar_lock_ejecucion, resolver_meses
+
+
+def _obtener_dagster_instance(base_dir: str) -> DagsterInstance:
+    """Devuelve la instancia Dagster persistente asociada a ``<base_dir>/dagster_home``."""
+    dagster_home = (Path(base_dir) / "dagster_home").resolve()
+    dagster_home.mkdir(parents=True, exist_ok=True)
+    cfg_dst = dagster_home / "dagster.yaml"
+    cfg_src = Path(__file__).resolve().parent / "dagster.yaml"
+    if cfg_src.is_file() and (not cfg_dst.is_file() or cfg_dst.stat().st_size == 0):
+        cfg_dst.write_text(cfg_src.read_text(encoding="utf-8"), encoding="utf-8")
+    return DagsterInstance.from_ref(InstanceRef.from_dir(str(dagster_home)))
 
 
 def construir_run_config(cfg: TaxiPipelineConfig) -> dict:
@@ -35,20 +50,25 @@ def ejecutar_cli(cfg: TaxiPipelineConfig) -> tuple[bool, tuple[str, str], str]:
     mes_cmp, mes = resolver_meses(cfg)
     job = defs.resolve_job_def("nyc_taxi_pipeline")
     run_config = construir_run_config(cfg)
-    res = job.execute_in_process(run_config=run_config, raise_on_error=False)
-    liberar_lock_ejecucion(res.run_id)
-    if not res.success:
-        errores = [
-            _mensaje_error(ev.event_specific_data.error)
-            for ev in res.all_events
-            if getattr(ev, "is_failure", False)
-            and getattr(ev, "event_specific_data", None) is not None
-            and getattr(ev.event_specific_data, "error", None) is not None
-        ]
-        errores = [e for e in errores if e]
-        detalle = errores[-1] if errores else f"Ejecución Dagster fallida (run_id={res.run_id})"
-        return False, (mes_cmp, mes), detalle
-    return True, (mes_cmp, mes), res.run_id
+    with _obtener_dagster_instance(cfg.base_dir) as instance:
+        res = job.execute_in_process(
+            run_config=run_config,
+            instance=instance,
+            raise_on_error=False,
+        )
+        liberar_lock_ejecucion(res.run_id)
+        if not res.success:
+            errores = [
+                _mensaje_error(ev.event_specific_data.error)
+                for ev in res.all_events
+                if getattr(ev, "is_failure", False)
+                and getattr(ev, "event_specific_data", None) is not None
+                and getattr(ev.event_specific_data, "error", None) is not None
+            ]
+            errores = [e for e in errores if e]
+            detalle = errores[-1] if errores else f"Ejecución Dagster fallida (run_id={res.run_id})"
+            return False, (mes_cmp, mes), detalle
+        return True, (mes_cmp, mes), res.run_id
 
 
 def parsear_args(argv=None) -> TaxiPipelineConfig:

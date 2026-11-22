@@ -1,7 +1,7 @@
 {
   "mes": "2025-07",
   "archivo": "yellow_tripdata_2025-07.parquet",
-  "generado_utc": "2026-11-22T22:16:59.563285+00:00",
+  "generado_utc": "2026-11-22T22:46:07.755110+00:00",
   "filas_leidas": 3898963,
   "aceptadas": 3648126,
   "cuarentena": 250837,

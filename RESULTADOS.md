@@ -1,4 +1,4 @@
-# Resultados: Enero 2025 vs Enero 2024 (2025-01 vs 2024-01)
+# Resultados: Julio 2025 vs Julio 2024 (2025-07 vs 2024-07)
 
 Generado por `src/preguntas.py` sobre el esquema `marts` de `nyc_taxi_dlt.duckdb`. Los números corresponden a viajes **aceptados** (después de la cuarentena).
 
@@ -11,7 +11,7 @@ Consulta: `sql/q1_top_zonas.sql`
 WITH v AS (
   SELECT year, pu_location_id, count(*) AS viajes
   FROM fact_trips
-  WHERE month = 1 AND year IN (2025, 2024)
+  WHERE month = 7 AND year IN (2025, 2024)
   GROUP BY year, pu_location_id
 )
 SELECT z.zone AS zona,
@@ -28,16 +28,16 @@ LIMIT 10;
 
 | zona | viajes_actual | viajes_anterior | variacion_pct |
 |---|---|---|---|
-| Midtown Center | 163,868 | 140,220 | 16.9 |
-| Upper East Side South | 159,332 | 140,161 | 13.7 |
-| Upper East Side North | 151,619 | 134,029 | 13.1 |
-| JFK Airport | 134,810 | 138,349 | -2.6 |
-| Times Sq/Theatre District | 120,659 | 102,999 | 17.1 |
-| Penn Station/Madison Sq West | 115,021 | 102,166 | 12.6 |
-| Midtown East | 113,840 | 104,374 | 9.1 |
-| Lincoln Square East | 107,541 | 101,848 | 5.6 |
-| Upper West Side South | 93,832 | 86,534 | 8.4 |
-| Midtown North | 92,702 | 83,712 | 10.7 |
+| JFK Airport | 167,835 | 171,068 | -1.9 |
+| Midtown Center | 165,568 | 152,361 | 8.7 |
+| Upper East Side South | 140,124 | 125,889 | 11.3 |
+| Penn Station/Madison Sq West | 123,101 | 103,654 | 18.8 |
+| Midtown East | 117,688 | 110,866 | 6.2 |
+| Times Sq/Theatre District | 117,573 | 104,800 | 12.2 |
+| Upper East Side North | 115,559 | 107,795 | 7.2 |
+| Murray Hill | 101,798 | 92,694 | 9.8 |
+| East Chelsea | 95,931 | 84,688 | 13.3 |
+| Lincoln Square East | 94,772 | 86,921 | 9.0 |
 
 **Interpretación:** (interpretación pendiente para este período)
 
@@ -52,7 +52,7 @@ WITH h AS (
          count(*) AS viajes,
          round(avg(total_amount), 2) AS ingreso_promedio_por_viaje
   FROM fact_trips
-  WHERE month = 1 AND year IN (2025, 2024)
+  WHERE month = 7 AND year IN (2025, 2024)
   GROUP BY year, pickup_hour
 ),
 r AS (
@@ -67,12 +67,12 @@ ORDER BY year, puesto;
 
 | anio | puesto | hora | ingreso_promedio_por_viaje | viajes |
 |---|---|---|---|---|
-| 2024 | 1 | 5 | 37.54 | 17,491 |
-| 2024 | 2 | 4 | 32.35 | 15,296 |
-| 2024 | 3 | 6 | 30.12 | 39,442 |
-| 2025 | 1 | 5 | 33.64 | 21,235 |
-| 2025 | 2 | 4 | 29.7 | 18,637 |
-| 2025 | 3 | 16 | 29.0 | 204,883 |
+| 2024 | 1 | 5 | 37.43 | 18,807 |
+| 2024 | 2 | 4 | 33.01 | 16,297 |
+| 2024 | 3 | 16 | 31.69 | 185,139 |
+| 2025 | 1 | 5 | 31.72 | 32,031 |
+| 2025 | 2 | 16 | 30.97 | 206,033 |
+| 2025 | 3 | 0 | 30.24 | 117,115 |
 
 **Interpretación:** (interpretación pendiente para este período)
 
@@ -85,7 +85,7 @@ Consulta: `sql/q3_cbd_congestion.sql`
 WITH base AS (
   SELECT pu_location_id, cbd_congestion_fee > 0 AS con_cargo
   FROM fact_trips
-  WHERE year = 2025 AND month = 1
+  WHERE year = 2025 AND month = 7
 ),
 total_mes AS (
   SELECT count(*) AS viajes_del_mes,
@@ -108,11 +108,11 @@ LIMIT 5;
 
 | zona | viajes | pct_zona_con_cargo | pct_con_cargo_en_el_mes | viajes_del_mes |
 |---|---|---|---|---|
-| Stuy Town/Peter Cooper Village | 5,344 | 90.61 | 65.98 | 3,323,516 |
-| Alphabet City | 7,110 | 90.48 | 65.98 | 3,323,516 |
-| Union Sq | 92,363 | 90.45 | 65.98 | 3,323,516 |
-| Midtown East | 113,840 | 90.38 | 65.98 | 3,323,516 |
-| Midtown Center | 163,868 | 89.89 | 65.98 | 3,323,516 |
+| Greenwich Village South | 48,603 | 99.85 | 74.39 | 3,648,126 |
+| SoHo | 30,889 | 99.8 | 74.39 | 3,648,126 |
+| West Village | 76,750 | 99.8 | 74.39 | 3,648,126 |
+| Battery Park | 2,110 | 99.76 | 74.39 | 3,648,126 |
+| Little Italy/NoLiTa | 41,146 | 99.73 | 74.39 | 3,648,126 |
 
 **Interpretación:** (interpretación pendiente para este período)
 
@@ -132,23 +132,23 @@ SELECT year AS anio,
        round(avg(tip_pct), 2) AS propina_promedio_pct,
        round(avg(tip_amount), 2) AS propina_promedio_usd
 FROM fact_trips
-WHERE month = 1 AND year IN (2025, 2024)
+WHERE month = 7 AND year IN (2025, 2024)
 GROUP BY year, payment_type
 ORDER BY year, payment_type;
 ```
 
 | anio | tipo_pago | descripcion | viajes | propina_promedio_pct | propina_promedio_usd |
 |---|---|---|---|---|---|
-| 2024 | 0 | Flex Fare trip | 117,216 | 9.14 | 1.81 |
-| 2024 | 1 | Credit card | 2,297,847 | 26.26 | 4.15 |
-| 2024 | 2 | Cash | 422,679 | 0.0 | 0.0 |
-| 2024 | 3 | No charge | 10,449 | 0.04 | 0.01 |
-| 2024 | 4 | Dispute | 22,785 | 0.03 | 0.0 |
-| 2025 | 0 | Flex Fare trip | 484,337 | 2.74 | 0.47 |
-| 2025 | 1 | Credit card | 2,423,357 | 26.29 | 4.1 |
-| 2025 | 2 | Cash | 368,043 | 0.0 | 0.0 |
-| 2025 | 3 | No charge | 12,126 | 0.01 | 0.0 |
-| 2025 | 4 | Dispute | 35,653 | 0.03 | 0.01 |
+| 2024 | 0 | Flex Fare trip | 271,191 | 3.53 | 0.74 |
+| 2024 | 1 | Credit card | 2,231,295 | 25.1 | 4.34 |
+| 2024 | 2 | Cash | 433,566 | 0.0 | 0.0 |
+| 2024 | 3 | No charge | 13,152 | 0.03 | 0.01 |
+| 2024 | 4 | Dispute | 32,257 | 0.09 | 0.02 |
+| 2025 | 0 | Flex Fare trip | 954,423 | 1.32 | 0.26 |
+| 2025 | 1 | Credit card | 2,277,639 | 25.13 | 4.33 |
+| 2025 | 2 | Cash | 350,555 | 0.0 | 0.0 |
+| 2025 | 3 | No charge | 14,090 | 0.04 | 0.01 |
+| 2025 | 4 | Dispute | 51,419 | 0.04 | 0.01 |
 
 **Interpretación:** (interpretación pendiente para este período)
 
@@ -164,7 +164,7 @@ SELECT f.year AS anio,
 FROM fact_trips f
 JOIN dim_zone o ON o.location_id = f.pu_location_id
 JOIN dim_zone d ON d.location_id = f.do_location_id
-WHERE f.month = 1 AND f.year IN (2025, 2024)
+WHERE f.month = 7 AND f.year IN (2025, 2024)
   AND (o.zone IN ('JFK Airport', 'LaGuardia Airport')
     OR d.zone IN ('JFK Airport', 'LaGuardia Airport'))
 GROUP BY f.year
@@ -173,8 +173,8 @@ ORDER BY f.year;
 
 | anio | viajes | tarifa_media |
 |---|---|---|
-| 2024 | 276,037 | 55.04 |
-| 2025 | 270,973 | 54.84 |
+| 2024 | 329,159 | 56.28 |
+| 2025 | 317,965 | 56.04 |
 
 **Interpretación:** (interpretación pendiente para este período)
 
@@ -187,7 +187,7 @@ Consulta: `sql/q6_variacion.sql`
 WITH m AS (
   SELECT year, count(*) AS viajes, avg(fare_amount) AS tarifa_media
   FROM fact_trips
-  WHERE month = 1 AND year IN (2025, 2024)
+  WHERE month = 7 AND year IN (2025, 2024)
   GROUP BY year
 )
 SELECT
@@ -204,6 +204,6 @@ FROM m;
 
 | viajes_anterior | viajes_actual | variacion_viajes_pct | tarifa_media_anterior | tarifa_media_actual | variacion_tarifa_pct |
 |---|---|---|---|---|---|
-| 2,870,976 | 3,323,516 | 15.76 | 18.47 | 17.47 | -5.41 |
+| 2,981,461 | 3,648,126 | 22.36 | 20.09 | 19.36 | -3.59 |
 
 **Interpretación:** (interpretación pendiente para este período)

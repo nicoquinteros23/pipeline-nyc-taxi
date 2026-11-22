@@ -1,50 +1,50 @@
 {
-  "runs_total": 21,
-  "success_total": 14,
+  "runs_total": 22,
+  "success_total": 15,
   "failures_total": 7,
-  "last_duration_seconds": 97.86,
-  "last_run_timestamp_seconds": 1795386243.6762238,
-  "last_success_timestamp_seconds": 1795386243.6762238,
+  "last_duration_seconds": 116.5,
+  "last_run_timestamp_seconds": 1795387642.3177938,
+  "last_success_timestamp_seconds": 1795387642.3177938,
   "last_status": 1,
-  "last_mes": "2025-01",
-  "last_mes_comparacion": "2024-01",
+  "last_mes": "2025-07",
+  "last_mes_comparacion": "2024-07",
   "peak_ram_gb": 1.54,
   "stage_durations": {
-    "ingesta_raw": 0.14,
-    "carga_dlt_staging": 1.73,
-    "calidad_cuarentena": 25.52,
-    "reconciliacion_staging": 0.15,
-    "dbt_marts": 50.5,
-    "verificacion_final": 5.43,
-    "resultados_analiticos": 7.0
+    "ingesta_raw": 0.28,
+    "carga_dlt_staging": 2.27,
+    "calidad_cuarentena": 40.9,
+    "reconciliacion_staging": 0.5,
+    "dbt_marts": 50.51,
+    "verificacion_final": 6.71,
+    "resultados_analiticos": 7.96
   },
   "reconciliacion": {
     "meses": {
-      "2024-01": {
-        "staging": 2964624,
-        "aceptadas": 2870976,
-        "cuarentena": 93648,
+      "2024-07": {
+        "staging": 3076903,
+        "aceptadas": 2981461,
+        "cuarentena": 95442,
         "diferencia": 0
       },
-      "2025-01": {
-        "staging": 3475226,
-        "aceptadas": 3323516,
-        "cuarentena": 151710,
+      "2025-07": {
+        "staging": 3898963,
+        "aceptadas": 3648126,
+        "cuarentena": 250837,
         "diferencia": 0
       }
     },
     "totales": {
-      "staging": 6439850,
-      "aceptadas": 6194492,
-      "cuarentena": 245358,
-      "intermediate_trips_validated": 6194492,
-      "intermediate_trips_quarantine": 245358
+      "staging": 6975866,
+      "aceptadas": 6629587,
+      "cuarentena": 346279,
+      "intermediate_trips_validated": 6629587,
+      "intermediate_trips_quarantine": 346279
     },
     "marts": {
-      "fact_trips": 6194492,
-      "agg_zone_hour_trips": 6194492,
-      "fact_total_revenue": 165896143.17,
-      "agg_total_revenue": 165896143.17
+      "fact_trips": 6629587,
+      "agg_zone_hour_trips": 6629587,
+      "fact_total_revenue": 188255976.15,
+      "agg_total_revenue": 188255976.15
     },
     "ok": true,
     "errores": []
@@ -68,7 +68,8 @@
     "eec9a5fd-fe5e-422f-beee-2cf5136a8793",
     "5b2fc24f-eb67-4c93-8841-98645985bccf",
     "15195d39-3d0c-4b36-83ee-e3770a7fbd14",
-    "7a7972bf-8147-4426-b3e1-0c44aee3e7d4"
+    "7a7972bf-8147-4426-b3e1-0c44aee3e7d4",
+    "ab46e2a3-c1e4-4787-a58d-f10032e8410e"
   ],
-  "last_run_id": "7a7972bf-8147-4426-b3e1-0c44aee3e7d4"
+  "last_run_id": "ab46e2a3-c1e4-4787-a58d-f10032e8410e"
 }
