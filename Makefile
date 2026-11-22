@@ -1,7 +1,31 @@
 PY  ?= python
-MES ?= 2025-03
+ifneq ("$(wildcard .venv/Scripts/python.exe)","")
+  PY := .venv\Scripts\python.exe
+  DBT := .venv\Scripts\dbt.exe
+else ifneq ("$(wildcard .venv/bin/python)","")
+  PY := .venv/bin/python
+  DBT := .venv/bin/dbt
+else
+  PY ?= python
+  DBT ?= dbt
+endif
 
-.PHONY: install up down ps dagster-run dbt-build dbt-test reconciliar preguntas test clean-data clean-all
+MES ?= 2025-03
+SIN_INGESTA ?= 0
+FORZAR_DLT ?= 0
+
+CLI_FLAGS :=
+ifeq ($(SIN_INGESTA),1)
+  CLI_FLAGS += --sin-ingesta
+endif
+ifeq ($(FORZAR_DLT),1)
+  CLI_FLAGS += --forzar-dlt
+endif
+
+.PHONY: all install up down ps dagster-run dbt-build dbt-test reconciliar preguntas test clean-data clean-all
+
+all:
+	$(PY) -m orchestration.cli --mes $(MES) $(CLI_FLAGS)
 
 install:
 	$(PY) -m pip install -r requirements.txt
@@ -16,19 +40,19 @@ ps:
 	docker compose ps
 
 dagster-run:
-	$(PY) -c "from orchestration import defs; job = defs.resolve_job_def('nyc_taxi_pipeline'); assets = [a.key.to_user_string() for a in defs.assets]; res = job.execute_in_process(run_config={'ops': {k: {'config': {'mes': '$(MES)', 'sin_ingesta': True}} for k in assets}}); assert res.success"
+	$(PY) -m orchestration.cli --mes $(MES) --sin-ingesta
 
 dbt-build:
-	dbt build --project-dir dbt_project --profiles-dir dbt_project
+	$(DBT) build --project-dir dbt_project --profiles-dir dbt_project
 
 dbt-test:
-	dbt test --project-dir dbt_project --profiles-dir dbt_project
+	$(DBT) test --project-dir dbt_project --profiles-dir dbt_project
 
 reconciliar:
-	$(PY) -m src.reconciliacion --con-marts
+	$(PY) -m src.reconciliacion --mes $(MES) --con-marts
 
 preguntas:
-	$(PY) -m src.preguntas --mes $(MES) --mes-comparacion 2024-03
+	$(PY) -m src.preguntas --mes $(MES)
 
 test:
 	$(PY) -m pytest -q

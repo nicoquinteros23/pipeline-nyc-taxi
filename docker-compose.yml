@@ -18,6 +18,10 @@ services:
     volumes:
       - ./src:/app/src:ro
       - ./orchestration:/app/orchestration:ro
+      - ./dbt_project:/app/dbt_project
+      - ./contracts:/app/contracts:ro
+      - ./sql:/app/sql:ro
+      - ./docs:/app/docs:ro
       - ./data:/app/data
       - ./orchestration/dagster.yaml:/app/data/dagster_home/dagster.yaml:ro
       - ./reports:/app/reports

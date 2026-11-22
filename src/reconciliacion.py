@@ -125,12 +125,51 @@ def reconciliar_fase2(
                     f"suma mensual de cuarentena ({total_cuarentena:,})"
                 )
 
+        if _existe_objeto(con, "staging", "selected_periods"):
+            sel_periodos = {
+                r[0]
+                for r in con.execute(
+                    "SELECT source_month FROM staging.selected_periods"
+                ).fetchall()
+            }
+            if sel_periodos != set(meses):
+                errores.append(
+                    f"staging.selected_periods ({sorted(sel_periodos)}) != meses esperados ({sorted(meses)})"
+                )
+
         if verificar_marts:
             for tbl in ("fact_trips", "dim_zone", "dim_date", "agg_zone_hour"):
                 if not _existe_objeto(con, "marts", tbl):
                     raise ErrorReconciliacionFase2(
                         f"Falta el modelo dbt marts.{tbl} en {warehouse}"
                     )
+
+            esperados = set(meses)
+            fact_cols = {
+                r[0] for r in con.execute("DESCRIBE marts.fact_trips").fetchall()
+            }
+            if "source_month" in fact_cols:
+                fact_meses = {
+                    r[0]
+                    for r in con.execute(
+                        "SELECT DISTINCT source_month FROM marts.fact_trips"
+                    ).fetchall()
+                }
+                if fact_meses != esperados:
+                    errores.append(
+                        f"marts.fact_trips meses ({sorted(fact_meses)}) != esperados ({sorted(esperados)})"
+                    )
+
+            agg_meses = {
+                r[0]
+                for r in con.execute(
+                    "SELECT DISTINCT strftime(pickup_date, '%Y-%m') FROM marts.agg_zone_hour"
+                ).fetchall()
+            }
+            if agg_meses != esperados:
+                errores.append(
+                    f"marts.agg_zone_hour meses ({sorted(agg_meses)}) != esperados ({sorted(esperados)})"
+                )
 
             fact_n = _contar(con, "marts.fact_trips")
             agg_trips, agg_rev = con.execute(
@@ -215,8 +254,13 @@ def main(argv=None) -> int:
     ap.add_argument(
         "--meses",
         nargs="+",
-        default=list(MESES_DEFECTO),
+        default=None,
         help="Meses a reconciliar, formato AAAA-MM (por defecto: 2024-03 2025-03)",
+    )
+    ap.add_argument(
+        "--mes",
+        default=None,
+        help="Mes principal AAAA-MM (calcula automáticamente año anterior + mes)",
     )
     ap.add_argument(
         "--warehouse",
@@ -229,9 +273,16 @@ def main(argv=None) -> int:
         help="Verificar además cierre con marts.fact_trips y marts.agg_zone_hour",
     )
     args = ap.parse_args(argv)
+    if args.meses:
+        meses_rec = tuple(args.meses)
+    elif args.mes:
+        anio, mm = args.mes.split("-")
+        meses_rec = (f"{int(anio) - 1:04d}-{mm}", args.mes)
+    else:
+        meses_rec = MESES_DEFECTO
     try:
         res = reconciliar_fase2(
-            meses=tuple(args.meses),
+            meses=meses_rec,
             warehouse_path=Path(args.warehouse),
             verificar_marts=args.con_marts,
         )

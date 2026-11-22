@@ -15,6 +15,7 @@ from dagster import (
 from orchestration.resources import (
     TaxiPipelineConfig,
     adquirir_lock_pipeline,
+    liberar_lock_ejecucion,
     resolver_meses,
     ruta_warehouse,
 )
@@ -58,52 +59,62 @@ def _duraciones_etapas(context: HookContext) -> dict[str, float]:
 
 @success_hook
 def registrar_exito_pipeline(context: HookContext) -> None:
-    if context.op.name != "verificacion_final":
+    if context.op.name != "resultados_analiticos":
         return
-    cfg = _extraer_config(context)
-    mes_cmp, mes = resolver_meses(cfg)
-    base_dir = Path(cfg.base_dir)
-    wh = ruta_warehouse(base_dir)
-    rec = None
     try:
-        with adquirir_lock_pipeline(base_dir):
-            rec = reconciliar_fase2(meses=(mes_cmp, mes), warehouse_path=wh, verificar_marts=True)
-    except Exception:
-        pass
-    registrar_ejecucion_metricas(
-        exito=True,
-        duracion_s=_duracion_run_segundos(context),
-        mes=mes,
-        mes_cmp=mes_cmp,
-        tiempos_etapas=_duraciones_etapas(context),
-        reconciliacion=rec,
-        metrics_path=Path(cfg.reports_dir) / "pipeline_metrics.json",
-        run_id=context.run_id,
-    )
+        cfg = _extraer_config(context)
+        mes_cmp, mes = resolver_meses(cfg)
+        base_dir = Path(cfg.base_dir)
+        wh = ruta_warehouse(base_dir)
+        rec = None
+        try:
+            with adquirir_lock_pipeline(base_dir):
+                rec = reconciliar_fase2(meses=(mes_cmp, mes), warehouse_path=wh, verificar_marts=True)
+        except Exception:
+            pass
+        registrar_ejecucion_metricas(
+            exito=True,
+            duracion_s=_duracion_run_segundos(context),
+            mes=mes,
+            mes_cmp=mes_cmp,
+            tiempos_etapas=_duraciones_etapas(context),
+            reconciliacion=rec,
+            metrics_path=Path(cfg.reports_dir) / "pipeline_metrics.json",
+            run_id=context.run_id,
+        )
+    finally:
+        liberar_lock_ejecucion(context.run_id)
 
 
 @failure_hook
 def registrar_fallo_pipeline(context: HookContext) -> None:
-    cfg = _extraer_config(context)
-    mes_cmp, mes = resolver_meses(cfg)
-    registrar_ejecucion_metricas(
-        exito=False,
-        duracion_s=_duracion_run_segundos(context),
-        mes=mes,
-        mes_cmp=mes_cmp,
-        tiempos_etapas=_duraciones_etapas(context),
-        error=f"Fallo en asset '{context.op.name}' (run_id={context.run_id})",
-        metrics_path=Path(cfg.reports_dir) / "pipeline_metrics.json",
-        run_id=context.run_id,
-    )
+    try:
+        cfg = _extraer_config(context)
+        try:
+            mes_cmp, mes = resolver_meses(cfg)
+        except Exception:
+            mes = cfg.mes
+            mes_cmp = cfg.mes_comparacion
+        registrar_ejecucion_metricas(
+            exito=False,
+            duracion_s=_duracion_run_segundos(context),
+            mes=mes,
+            mes_cmp=mes_cmp,
+            tiempos_etapas=_duraciones_etapas(context),
+            error=f"Fallo en asset '{context.op.name}' (run_id={context.run_id})",
+            metrics_path=Path(cfg.reports_dir) / "pipeline_metrics.json",
+            run_id=context.run_id,
+        )
+    finally:
+        liberar_lock_ejecucion(context.run_id)
 
 
 nyc_taxi_pipeline = define_asset_job(
     name="nyc_taxi_pipeline",
     description=(
-        "Ejecuta en serie las 6 etapas oficiales (ingesta_raw -> carga_dlt_staging -> "
-        "calidad_cuarentena -> reconciliacion_staging -> dbt_marts -> verificacion_final) "
-        "protegiendo DuckDB y el límite de 8 GB de RAM."
+        "Ejecuta en serie las 7 etapas oficiales (ingesta_raw -> carga_dlt_staging -> "
+        "calidad_cuarentena -> reconciliacion_staging -> dbt_marts -> verificacion_final -> "
+        "resultados_analiticos) para cualquier período AAAA-MM."
     ),
     selection=AssetSelection.all(),
     executor_def=in_process_executor,

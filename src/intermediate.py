@@ -57,6 +57,20 @@ def crear_intermediate(
         raise ValueError("Debe especificarse al menos un mes")
 
     meses_ordenados = tuple(meses)
+    if len(set(meses_ordenados)) != len(meses_ordenados):
+        raise ValueError(f"Hay meses duplicados en intermediate: {meses_ordenados}")
+
+    archivos_mes: list[tuple[str, str, Path, Path]] = []
+    for mes in meses_ordenados:
+        anio, mm = mes.split("-")
+        particion = Path(f"year={anio}") / f"month={int(mm)}"
+        validada = base_dir / "validada" / particion / "data.parquet"
+        cuarentena = base_dir / "quarantine" / particion / "data.parquet"
+        for archivo in (validada, cuarentena):
+            if not archivo.is_file():
+                raise FileNotFoundError(f"No existe: {archivo}")
+        archivos_mes.append((mes, f"{anio}_{mm}", validada, cuarentena))
+
     resumen_meses: dict[str, dict[str, int]] = {}
     selects_validada: list[str] = []
     selects_cuarentena: list[str] = []
@@ -64,65 +78,59 @@ def crear_intermediate(
     with duckdb.connect(str(warehouse)) as con:
         _configurar_duckdb(con, base_dir, memoria=memoria)
         con.execute("CREATE SCHEMA IF NOT EXISTS intermediate")
+        con.execute("BEGIN TRANSACTION")
+        try:
+            for mes, sufijo, validada, cuarentena in archivos_mes:
+                vista_val = f"intermediate.trips_validated_{sufijo}"
+                vista_cua = f"intermediate.trips_quarantine_{sufijo}"
 
-        for mes in meses_ordenados:
-            anio, mm = mes.split("-")
-            particion = Path(f"year={anio}") / f"month={int(mm)}"
+                con.execute(
+                    f"""
+                    CREATE OR REPLACE VIEW {vista_val} AS
+                    SELECT *
+                    FROM read_parquet('{_ruta_sql(validada)}', hive_partitioning = false)
+                    """
+                )
+                con.execute(
+                    f"""
+                    CREATE OR REPLACE VIEW {vista_cua} AS
+                    SELECT *
+                    FROM read_parquet('{_ruta_sql(cuarentena)}', hive_partitioning = false)
+                    """
+                )
 
-            validada = base_dir / "validada" / particion / "data.parquet"
-            cuarentena = base_dir / "quarantine" / particion / "data.parquet"
+                _verificar_columnas(con, vista_val, COLUMNAS_VALIDADA_REQ)
+                _verificar_columnas(con, vista_cua, COLUMNAS_CUARENTENA_REQ)
 
-            for archivo in (validada, cuarentena):
-                if not archivo.is_file():
-                    raise FileNotFoundError(f"No existe: {archivo}")
+                aceptadas = int(con.execute(f"SELECT COUNT(*) FROM {vista_val}").fetchone()[0])
+                rechazadas = int(con.execute(f"SELECT COUNT(*) FROM {vista_cua}").fetchone()[0])
 
-            sufijo = f"{anio}_{mm}"
-            vista_val = f"intermediate.trips_validated_{sufijo}"
-            vista_cua = f"intermediate.trips_quarantine_{sufijo}"
+                resumen_meses[mes] = {
+                    "aceptadas": aceptadas,
+                    "cuarentena": rechazadas,
+                }
+                print(f"{mes}: aceptadas={aceptadas:,}, cuarentena={rechazadas:,}")
+
+                selects_validada.append(
+                    f"SELECT *, '{mes}' AS source_month FROM {vista_val}"
+                )
+                selects_cuarentena.append(
+                    f"SELECT *, '{mes}' AS source_month FROM {vista_cua}"
+                )
+
+            union_val = "\nUNION ALL BY NAME\n".join(selects_validada)
+            union_cua = "\nUNION ALL BY NAME\n".join(selects_cuarentena)
 
             con.execute(
-                f"""
-                CREATE OR REPLACE VIEW {vista_val} AS
-                SELECT *
-                FROM read_parquet('{_ruta_sql(validada)}', hive_partitioning = false)
-                """
+                f"CREATE OR REPLACE VIEW intermediate.trips_validated AS\n{union_val}"
             )
             con.execute(
-                f"""
-                CREATE OR REPLACE VIEW {vista_cua} AS
-                SELECT *
-                FROM read_parquet('{_ruta_sql(cuarentena)}', hive_partitioning = false)
-                """
+                f"CREATE OR REPLACE VIEW intermediate.trips_quarantine AS\n{union_cua}"
             )
-
-            _verificar_columnas(con, vista_val, COLUMNAS_VALIDADA_REQ)
-            _verificar_columnas(con, vista_cua, COLUMNAS_CUARENTENA_REQ)
-
-            aceptadas = int(con.execute(f"SELECT COUNT(*) FROM {vista_val}").fetchone()[0])
-            rechazadas = int(con.execute(f"SELECT COUNT(*) FROM {vista_cua}").fetchone()[0])
-
-            resumen_meses[mes] = {
-                "aceptadas": aceptadas,
-                "cuarentena": rechazadas,
-            }
-            print(f"{mes}: aceptadas={aceptadas:,}, cuarentena={rechazadas:,}")
-
-            selects_validada.append(
-                f"SELECT *, '{mes}' AS source_month FROM {vista_val}"
-            )
-            selects_cuarentena.append(
-                f"SELECT *, '{mes}' AS source_month FROM {vista_cua}"
-            )
-
-        union_val = "\nUNION ALL BY NAME\n".join(selects_validada)
-        union_cua = "\nUNION ALL BY NAME\n".join(selects_cuarentena)
-
-        con.execute(
-            f"CREATE OR REPLACE VIEW intermediate.trips_validated AS\n{union_val}"
-        )
-        con.execute(
-            f"CREATE OR REPLACE VIEW intermediate.trips_quarantine AS\n{union_cua}"
-        )
+            con.execute("COMMIT")
+        except Exception:
+            con.execute("ROLLBACK")
+            raise
 
         total_aceptadas = int(
             con.execute("SELECT COUNT(*) FROM intermediate.trips_validated").fetchone()[0]

@@ -147,4 +147,4 @@ def test_preguntas_ejecutan_sobre_marts_nyc_taxi_dlt(tmp_path):
     texto = salida.read_text(encoding="utf-8")
     for n in range(1, 7):
         assert f"## Pregunta {n}:" in texto
-    assert texto.count("(pendiente)") == 6
+    assert texto.count("pendiente para este período") == 6

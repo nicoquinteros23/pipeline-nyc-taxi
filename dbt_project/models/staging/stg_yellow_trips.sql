@@ -1,3 +1,23 @@
-SELECT * FROM {{ ref('stg_yellow_trips_2024_03') }}
-UNION ALL BY NAME
-SELECT * FROM {{ ref('stg_yellow_trips_2025_03') }}
+SELECT
+  CAST(vendor_id AS INTEGER) AS vendor_id,
+  tpep_pickup_datetime,
+  tpep_dropoff_datetime,
+  CAST(passenger_count AS BIGINT) AS passenger_count,
+  CAST(trip_distance AS DOUBLE) AS trip_distance,
+  CAST(ratecode_id AS BIGINT) AS ratecode_id,
+  CAST(store_and_fwd_flag AS VARCHAR) AS store_and_fwd_flag,
+  CAST(pu_location_id AS INTEGER) AS pu_location_id,
+  CAST(do_location_id AS INTEGER) AS do_location_id,
+  CAST(payment_type AS BIGINT) AS payment_type,
+  CAST(fare_amount AS DOUBLE) AS fare_amount,
+  CAST(extra AS DOUBLE) AS extra,
+  CAST(mta_tax AS DOUBLE) AS mta_tax,
+  CAST(tip_amount AS DOUBLE) AS tip_amount,
+  CAST(tolls_amount AS DOUBLE) AS tolls_amount,
+  CAST(improvement_surcharge AS DOUBLE) AS improvement_surcharge,
+  CAST(total_amount AS DOUBLE) AS total_amount,
+  CAST(congestion_surcharge AS DOUBLE) AS congestion_surcharge,
+  CAST(airport_fee AS DOUBLE) AS airport_fee,
+  CAST(cbd_congestion_fee AS DOUBLE) AS cbd_congestion_fee,
+  CAST(source_month AS VARCHAR) AS source_month
+FROM {{ source('dlt_staging', 'yellow_trips_selected') }}

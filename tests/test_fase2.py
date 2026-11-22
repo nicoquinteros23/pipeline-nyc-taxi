@@ -3,7 +3,7 @@ from pathlib import Path
 import duckdb
 import pytest
 
-from src.carga_dlt import cargar_mes
+from src.carga_dlt import actualizar_staging_seleccionado, cargar_mes
 from src.intermediate import crear_intermediate
 from src.reconciliacion import ErrorReconciliacionFase2, reconciliar_fase2
 
@@ -104,18 +104,27 @@ def test_reconciliacion_fase2_con_marts(tmp_path):
         con.execute("CREATE TABLE marts.dim_date (date_key INTEGER)")
         con.execute(
             "CREATE VIEW marts.fact_trips AS "
-            "SELECT source_file, file_row_number, 10.0::DOUBLE AS total_amount "
+            "SELECT source_file, file_row_number, source_month, 10.0::DOUBLE AS total_amount "
             "FROM intermediate.trips_validated"
         )
         con.execute(
             "CREATE TABLE marts.agg_zone_hour AS "
+            "SELECT 1 AS pu_location_id, DATE '2024-03-01' AS pickup_date, 10 AS pickup_hour, "
+            "2::BIGINT AS trips, 20.0::DOUBLE AS total_revenue "
+            "UNION ALL "
             "SELECT 1 AS pu_location_id, DATE '2025-03-01' AS pickup_date, 10 AS pickup_hour, "
-            "4::BIGINT AS trips, 40.0::DOUBLE AS total_revenue"
+            "2::BIGINT AS trips, 20.0::DOUBLE AS total_revenue"
         )
 
     res = reconciliar_fase2(meses=("2024-03", "2025-03"), warehouse_path=wh, verificar_marts=True)
     assert res["marts"]["fact_trips"] == 4
     assert res["marts"]["agg_zone_hour_trips"] == 4
+
+    # Si staging.selected_periods no coincide con meses solicitados, falla claramente
+    with duckdb.connect(str(wh)) as con:
+        con.execute("CREATE OR REPLACE VIEW staging.selected_periods AS SELECT '2024-01' AS source_month")
+    with pytest.raises(ErrorReconciliacionFase2, match="selected_periods"):
+        reconciliar_fase2(meses=("2024-03", "2025-03"), warehouse_path=wh, verificar_marts=True)
 
 
 def test_carga_dlt_valida_lote_y_omite_si_ya_coincide(tmp_path, monkeypatch, capsys):

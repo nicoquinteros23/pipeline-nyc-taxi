@@ -10,9 +10,10 @@ import yaml
 
 from orchestration import defs
 from orchestration.resources import (
-    PERIODOS_SOPORTADOS,
     TaxiPipelineConfig,
+    adquirir_lock_ejecucion,
     adquirir_lock_pipeline,
+    liberar_lock_ejecucion,
     resolver_meses,
     verificar_sin_otra_ejecucion_activa,
 )
@@ -33,6 +34,7 @@ EXPECTED_ASSETS = [
     "reconciliacion_staging",
     "dbt_marts",
     "verificacion_final",
+    "resultados_analiticos",
 ]
 
 
@@ -52,17 +54,18 @@ def test_dagster_definitions_carga_y_dependencias():
 
 
 def test_configuracion_periodos_unificada():
-    cfg = TaxiPipelineConfig()
-    assert resolver_meses(cfg) == PERIODOS_SOPORTADOS == ("2024-03", "2025-03")
+    assert resolver_meses(TaxiPipelineConfig()) == ("2024-03", "2025-03")
+    assert resolver_meses(TaxiPipelineConfig(mes="2025-01")) == ("2024-01", "2025-01")
+    assert resolver_meses(TaxiPipelineConfig(mes="2026-06")) == ("2025-06", "2026-06")
+    assert resolver_meses(TaxiPipelineConfig(mes="2025-12")) == ("2024-12", "2025-12")
+    assert TaxiPipelineConfig().sin_ingesta is False
 
-    with pytest.raises(ValueError, match="inválido"):
-        resolver_meses(TaxiPipelineConfig(mes="marzo"))
+    for malo in ("2025-00", "2025-13", "2025-1", "texto", "1900-01"):
+        with pytest.raises(ValueError):
+            resolver_meses(TaxiPipelineConfig(mes=malo))
 
     with pytest.raises(ValueError, match="iguales"):
         resolver_meses(TaxiPipelineConfig(mes="2025-03", mes_comparacion="2025-03"))
-
-    with pytest.raises(ValueError, match="no soportados"):
-        resolver_meses(TaxiPipelineConfig(mes="2025-06"))
 
 
 def test_concurrencia_lock_y_ejecucion_activa_bloqueada(tmp_path):
@@ -70,9 +73,18 @@ def test_concurrencia_lock_y_ejecucion_activa_bloqueada(tmp_path):
         with pytest.raises(Timeout):
             with adquirir_lock_pipeline(tmp_path, timeout=0.1):
                 pass
-    # Tras salir del contexto, el bloqueo queda liberado y puede volver a tomarse
     with adquirir_lock_pipeline(tmp_path, timeout=0.5):
         pass
+
+    adquirir_lock_ejecucion(tmp_path, "run-a", timeout=0.5)
+    try:
+        with pytest.raises(RuntimeError, match="en curso"):
+            adquirir_lock_ejecucion(tmp_path, "run-b", timeout=0.1)
+    finally:
+        liberar_lock_ejecucion("run-a")
+    # Confirmar liberación tras el bloque try/finally
+    adquirir_lock_ejecucion(tmp_path, "run-b", timeout=0.5)
+    liberar_lock_ejecucion("run-b")
 
     class FakeInstance:
         def get_runs(self, filters=None):
@@ -93,7 +105,14 @@ def test_dagster_fallo_controlado_registra_error_sin_tocar_datos(tmp_path):
     res = job.execute_in_process(
         run_config={
             "ops": {
-                k: {"config": {"simular_fallo": True, "reports_dir": str(tmp_path)}}
+                k: {
+                    "config": {
+                        "simular_fallo": True,
+                        "base_dir": str(tmp_path / "data"),
+                        "reports_dir": str(tmp_path),
+                        "resultados_path": str(tmp_path / "RESULTADOS.md"),
+                    }
+                }
                 for k in EXPECTED_ASSETS
             }
         },

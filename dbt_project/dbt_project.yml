@@ -13,6 +13,7 @@ clean-targets:
 
 vars:
   zones_csv_path: "data/raw/zones/taxi_zone_lookup.csv"
+  selected_months: null
 
 models:
   nyc_taxi_dbt:

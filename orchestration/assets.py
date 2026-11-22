@@ -1,4 +1,4 @@
-"""Assets de Dagster del flujo único oficial NYC Taxi (6 etapas)."""
+"""Assets de Dagster del flujo único oficial NYC Taxi (7 etapas dinámicas)."""
 
 import time
 from pathlib import Path
@@ -7,17 +7,20 @@ from dagster import AssetExecutionContext, MetadataValue, Output, asset
 
 from orchestration.resources import (
     TaxiPipelineConfig,
+    adquirir_lock_ejecucion,
     adquirir_lock_pipeline,
     ejecutar_dbt,
+    obtener_run_id,
     resolver_meses,
     ruta_warehouse,
     verificar_sin_otra_ejecucion_activa,
 )
 from src.calidad import procesar_mes
-from src.carga_dlt import cargar_mes
+from src.carga_dlt import actualizar_staging_seleccionado, cargar_mes
 from src.esquema import validar_mes
 from src.ingesta import ingestar, ingestar_zonas
 from src.intermediate import crear_intermediate
+from src.preguntas import ejecutar as generar_resultados
 from src.reconciliacion import imprimir_resumen, reconciliar_fase2
 
 
@@ -29,13 +32,15 @@ def ingesta_raw(
     context: AssetExecutionContext, config: TaxiPipelineConfig
 ) -> Output[dict]:
     verificar_sin_otra_ejecucion_activa(context)
+    base_dir = Path(config.base_dir)
+    adquirir_lock_ejecucion(base_dir, obtener_run_id(context))
+
     if config.simular_fallo:
         raise RuntimeError(
             "Fallo controlado de prueba en Dagster (simular_fallo=True); no se alteraron datos reales."
         )
 
     t0 = time.perf_counter()
-    base_dir = Path(config.base_dir)
     reports_dir = Path(config.reports_dir)
     mes_cmp, mes = resolver_meses(config)
     meses = (mes_cmp, mes)
@@ -66,7 +71,7 @@ def ingesta_raw(
 @asset(
     deps=[ingesta_raw],
     group_name="staging",
-    description="Carga idempotente por lotes Arrow hacia DuckDB (esquema staging) con dlt.",
+    description="Carga idempotente dlt por mes y actualiza la vista staging.yellow_trips_selected.",
 )
 def carga_dlt_staging(
     context: AssetExecutionContext, config: TaxiPipelineConfig
@@ -79,12 +84,18 @@ def carga_dlt_staging(
     with adquirir_lock_pipeline(base_dir):
         for m in meses:
             cargar_mes(m, base_dir=base_dir, warehouse_path=wh, forzar=config.forzar_dlt)
+        sel = actualizar_staging_seleccionado(meses, warehouse_path=wh)
 
     dur = round(time.perf_counter() - t0, 2)
-    context.log.info(f"carga_dlt_staging OK en {wh} en {dur}s")
+    context.log.info(f"carga_dlt_staging OK en {wh} en {dur}s: {sel}")
     return Output(
-        {"warehouse": wh.as_posix(), "meses": list(meses), "duracion_s": dur},
-        metadata={"warehouse": wh.as_posix(), "duracion_s": dur},
+        {"warehouse": wh.as_posix(), "seleccion": sel, "duracion_s": dur},
+        metadata={
+            "warehouse": wh.as_posix(),
+            "meses": str(sel["meses"]),
+            "total_staging_selected": sel["total"],
+            "duracion_s": dur,
+        },
     )
 
 
@@ -159,7 +170,7 @@ def reconciliacion_staging(
 @asset(
     deps=[reconciliacion_staging],
     group_name="dbt",
-    description="Ejecuta dbt build (staging, intermediate, marts y 50 tests) sobre nyc_taxi_dlt.duckdb.",
+    description="Ejecuta dbt build (staging, intermediate, marts y tests) para los períodos seleccionados.",
 )
 def dbt_marts(
     context: AssetExecutionContext, config: TaxiPipelineConfig
@@ -167,6 +178,7 @@ def dbt_marts(
     t0 = time.perf_counter()
     base_dir = Path(config.base_dir)
     wh = ruta_warehouse(base_dir)
+    meses = resolver_meses(config)
     zonas_csv = base_dir / "raw" / "zones" / "taxi_zone_lookup.csv"
 
     with adquirir_lock_pipeline(base_dir):
@@ -175,20 +187,21 @@ def dbt_marts(
             dbt_dir=Path(config.dbt_dir),
             warehouse_path=wh,
             zones_csv_path=zonas_csv,
+            selected_months=meses,
         )
 
     dur = round(time.perf_counter() - t0, 2)
-    context.log.info(f"dbt_marts OK en {dur}s")
+    context.log.info(f"dbt_marts OK para {meses} en {dur}s")
     return Output(
-        {"warehouse": wh.as_posix(), "duracion_s": dur},
-        metadata={"warehouse": wh.as_posix(), "duracion_s": dur},
+        {"warehouse": wh.as_posix(), "meses": list(meses), "duracion_s": dur},
+        metadata={"warehouse": wh.as_posix(), "meses": str(meses), "duracion_s": dur},
     )
 
 
 @asset(
     deps=[dbt_marts],
     group_name="verificacion",
-    description="Reconciliación final integral incluyendo marts.fact_trips y marts.agg_zone_hour.",
+    description="Reconciliación final integral verificando consistencia de períodos en marts.",
 )
 def verificacion_final(
     context: AssetExecutionContext, config: TaxiPipelineConfig
@@ -207,6 +220,7 @@ def verificacion_final(
     return Output(
         {**res, "duracion_s": dur},
         metadata={
+            "meses": str(meses),
             "staging_total": res["totales"]["staging"],
             "aceptadas_total": res["totales"]["aceptadas"],
             "cuarentena_total": res["totales"]["cuarentena"],
@@ -218,6 +232,38 @@ def verificacion_final(
     )
 
 
+@asset(
+    deps=[verificacion_final],
+    group_name="resultados",
+    description="Genera RESULTADOS.md y copia histórica por período con las 6 preguntas SQL.",
+)
+def resultados_analiticos(
+    context: AssetExecutionContext, config: TaxiPipelineConfig
+) -> Output[dict]:
+    t0 = time.perf_counter()
+    base_dir = Path(config.base_dir)
+    reports_dir = Path(config.reports_dir)
+    mes_cmp, mes = resolver_meses(config)
+    salida = Path(config.resultados_path)
+    copia = reports_dir / f"resultados_{mes}.md"
+
+    with adquirir_lock_pipeline(base_dir):
+        generar_resultados(
+            mes,
+            mes_cmp,
+            base_dir=base_dir,
+            salida=salida,
+            copia_periodo=copia,
+        )
+
+    dur = round(time.perf_counter() - t0, 2)
+    context.log.info(f"resultados_analiticos OK ({mes} vs {mes_cmp}) en {dur}s")
+    return Output(
+        {"mes": mes, "mes_comparacion": mes_cmp, "salida": salida.as_posix(), "copia": copia.as_posix(), "duracion_s": dur},
+        metadata={"mes": mes, "mes_comparacion": mes_cmp, "salida": salida.as_posix(), "duracion_s": dur},
+    )
+
+
 ALL_ASSETS = [
     ingesta_raw,
     carga_dlt_staging,
@@ -225,4 +271,5 @@ ALL_ASSETS = [
     reconciliacion_staging,
     dbt_marts,
     verificacion_final,
+    resultados_analiticos,
 ]

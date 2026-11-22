@@ -1,4 +1,5 @@
 import argparse
+import gc
 import json
 import shutil
 import sys
@@ -165,7 +166,7 @@ def _escribir_reportes(rep, reports_dir):
 
 
 def procesar_mes(mes, base_dir=Path("data"), reports_dir=Path("reports"),
-                 contrato_path=CONTRATO, reglas_path=REGLAS, memoria="1.5GB"):
+                 contrato_path=CONTRATO, reglas_path=REGLAS, memoria="1.2GB"):
     anio, mm = mes.split("-")
     contrato = cargar_contrato(contrato_path)
     reglas = cargar_reglas(reglas_path)
@@ -184,12 +185,16 @@ def procesar_mes(mes, base_dir=Path("data"), reports_dir=Path("reports"),
     tmp_duck = base_dir / "tmp" / "duckdb"
     tmp_duck.mkdir(parents=True, exist_ok=True)
 
-    con = duckdb.connect(str(trabajo / "work.duckdb"))
+    con = duckdb.connect(
+        str(trabajo / "work.duckdb"),
+        config={
+            "memory_limit": str(memoria),
+            "temp_directory": tmp_duck.as_posix(),
+            "preserve_insertion_order": False,
+            "threads": 2,
+        },
+    )
     try:
-        con.execute(f"SET memory_limit = '{memoria}'")
-        con.execute(f"SET temp_directory = '{tmp_duck.as_posix()}'")
-        con.execute("SET preserve_insertion_order = false")
-        con.execute("SET threads = 2")
         crear_vista_zonas(con, base_dir)
         con.execute("CREATE TABLE evaluado AS " + sql_evaluado(sql_origen, contrato, reglas, mes))
 
@@ -223,6 +228,7 @@ def procesar_mes(mes, base_dir=Path("data"), reports_dir=Path("reports"),
         }
     finally:
         con.close()
+        gc.collect()
 
     try:
         reconciliar(filas_leidas, aceptadas, cuarentena)
