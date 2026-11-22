@@ -1,4 +1,3 @@
-
 services:
   pipeline:
     build:
@@ -9,6 +8,9 @@ services:
 
     environment:
       PYTHONUNBUFFERED: "1"
+      PYTHONPATH: /app
+      DBT_PROFILES_DIR: /app/dbt_project
+      DUCKDB_PATH: data/warehouse/nyc_taxi_dlt.duckdb
 
     volumes:
       - ./data:/app/data

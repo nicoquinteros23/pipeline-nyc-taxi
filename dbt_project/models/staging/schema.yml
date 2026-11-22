@@ -1,0 +1,34 @@
+version: 2
+
+models:
+  - name: stg_yellow_trips_2024_03
+    description: "Vista staging normalizada de viajes raw de marzo 2024 (cbd_congestion_fee en NULL)."
+    columns:
+      - name: source_month
+        tests: [not_null]
+
+  - name: stg_yellow_trips_2025_03
+    description: "Vista staging normalizada de viajes raw de marzo 2025."
+    columns:
+      - name: source_month
+        tests: [not_null]
+
+  - name: stg_yellow_trips
+    description: "Vista unificada (UNION ALL BY NAME) de los viajes raw cargados por dlt en staging."
+    columns:
+      - name: source_month
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["2024-03", "2025-03"]
+
+  - name: stg_taxi_zones
+    description: "Catálogo oficial de zonas de taxi de NYC leído desde taxi_zone_lookup.csv."
+    columns:
+      - name: location_id
+        tests: [not_null, unique]
+      - name: borough
+        tests: [not_null]
+      - name: zone
+        tests: [not_null]

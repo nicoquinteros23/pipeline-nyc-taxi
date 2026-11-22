@@ -1,0 +1,12 @@
+nyc_taxi_dbt:
+  target: dev
+  outputs:
+    dev:
+      type: duckdb
+      path: "{{ env_var('DUCKDB_PATH', 'data/warehouse/nyc_taxi_dlt.duckdb') }}"
+      schema: main
+      threads: 2
+      settings:
+        memory_limit: "1.5GB"
+        preserve_insertion_order: false
+        temp_directory: "data/tmp/duckdb"

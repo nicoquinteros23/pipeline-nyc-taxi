@@ -1,7 +1,7 @@
 PY  ?= python
 MES ?= 2025-03
 
-.PHONY: all install test demo-reproceso clean-data clean-all dashboard
+.PHONY: all install test demo-reproceso clean-data clean-all dashboard intermediate reconciliar dbt-build dbt-test fase2
 
 all:
 	$(PY) -m src.pipeline --mes $(MES)
@@ -23,3 +23,18 @@ clean-all:
 
 dashboard:
 	$(PY) -m streamlit run dashboard/app.py
+
+intermediate:
+	$(PY) -m src.intermediate
+
+reconciliar:
+	$(PY) -m src.reconciliacion --con-marts
+
+dbt-build:
+	dbt build --project-dir dbt_project --profiles-dir dbt_project
+
+dbt-test:
+	dbt test --project-dir dbt_project --profiles-dir dbt_project
+
+fase2:
+	$(PY) -m src.pipeline_fase2 --mes $(MES)

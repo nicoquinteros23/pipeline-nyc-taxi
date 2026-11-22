@@ -1,0 +1,49 @@
+{
+  "mes": "2025-03",
+  "mes_comparacion": "2024-03",
+  "fecha_utc": "2026-11-22T14:08:28.477713+00:00",
+  "warehouse": "data/warehouse/nyc_taxi_dlt.duckdb",
+  "tiempo_total_s": 194.4,
+  "tiempos_por_etapa_s": {
+    "esquema": 0.2,
+    "dlt_staging": 0.3,
+    "calidad": 85.4,
+    "intermediate": 1.1,
+    "reconciliacion": 0.5,
+    "transformacion": 24.7,
+    "dbt_build": 59.8,
+    "verificacion_final": 22.3
+  },
+  "pico_ram_gb": 1.54,
+  "reconciliacion": {
+    "meses": {
+      "2024-03": {
+        "staging": 3582628,
+        "aceptadas": 3453562,
+        "cuarentena": 129066,
+        "diferencia": 0
+      },
+      "2025-03": {
+        "staging": 4145257,
+        "aceptadas": 3955293,
+        "cuarentena": 189964,
+        "diferencia": 0
+      }
+    },
+    "totales": {
+      "staging": 7727885,
+      "aceptadas": 7408855,
+      "cuarentena": 319030,
+      "intermediate_trips_validated": 7408855,
+      "intermediate_trips_quarantine": 319030
+    },
+    "marts": {
+      "fact_trips": 7408855,
+      "agg_zone_hour_trips": 7408855,
+      "fact_total_revenue": 203263790.71,
+      "agg_total_revenue": 203263790.71
+    },
+    "ok": true,
+    "errores": []
+  }
+}

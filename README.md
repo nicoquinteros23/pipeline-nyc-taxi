@@ -4,7 +4,7 @@ Pipeline reproducible que ingiere, valida, limpia y modela los viajes de taxi am
 de dos meses: el mes asignado (**2025-03**) y el mismo mes de 2024 (**2024-03**), junto con la tabla de
 zonas de la TLC. Responde seis preguntas de negocio con SQL sobre el modelo (ver `RESULTADOS.md`).
 
-Stack: Python 3.10 o superior (probado con 3.12), DuckDB, PyArrow, PyYAML, requests, psutil y pytest.
+Stack: Python 3.10 o superior (probado con 3.12.10), DuckDB 1.5.6, dlt 1.32.0, dbt-core 1.12.7, dbt-duckdb 1.11.1, PyArrow 26.0.1, PyYAML, requests, psutil, pytest y Docker.
 
 ## 1. Cómo instalar y ejecutar
 
@@ -35,7 +35,13 @@ Otros comandos:
 
 | Comando | Qué hace |
 |---|---|
-| `make test` | Corre los 36 tests automatizados |
+| `make all MES=2025-03` | Ejecuta el pipeline original (Fase 1) completo |
+| `make fase2 MES=2025-03` | Ejecuta el pipeline completo de Fase 2 (`dlt` + calidad + `intermediate` + `dbt build` + reconciliación) |
+| `make intermediate` | Reconstruye de forma idempotente las vistas `intermediate` sobre Parquet validados/cuarentena |
+| `make reconciliar` | Verifica `staging = aceptadas + cuarentena` y cierre con `marts` de dbt |
+| `make dbt-build` | Ejecuta modelos y tests de dbt (`staging`, `intermediate`, `marts`) |
+| `make dbt-test` | Ejecuta únicamente los 50 tests de dbt |
+| `make test` | Corre los 42 tests automatizados (`pytest`) |
 | `make demo-reproceso` | Reprocesa un mes e imprime conteos antes y después (ver sección 3.5) |
 | `make clean-data` | Borra las capas derivadas y reportes (no borra `data/raw`) |
 | `make clean-all` | Borra **todo** (`data/` completo incluyendo `data/raw` y `reports/`) para descargar y correr desde cero |
@@ -268,21 +274,94 @@ Máquina de medición: AMD Ryzen 3 7320U with Radeon Graphics, 4 nucleos
 - En Windows, un proyecto dentro de una carpeta sincronizada (OneDrive) puede dar errores de archivo
   bloqueado al mover carpetas; conviene pausar la sincronización o usar una ruta fuera de OneDrive.
 - El pipeline procesa los meses en forma secuencial y en un solo proceso.
+- La base heredada `data/warehouse/taxi.duckdb` (Fase 1) fue creada originalmente con DuckDB 2.0.0 (formato de almacenamiento v69) y se conserva sin modificar; el entorno actual de Fase 2 fija `duckdb==1.5.6` por compatibilidad con `dlt` y `dbt-duckdb`, por lo que trabaja íntegramente sobre `data/warehouse/nyc_taxi_dlt.duckdb`.
 
 ## 7. Estructura del repositorio
 
 ```
-README.md  RESULTADOS.md  Makefile  requirements.txt  requirements-dashboard.txt  .gitignore
+README.md  RESULTADOS.md  Makefile  requirements.txt  requirements-dashboard.txt  Dockerfile  docker-compose.yml  .gitignore  .dockerignore
 contracts/   yellow_schema.yaml (contrato de esquema), quality_rules.yaml (reglas de calidad)
-src/         ingesta, esquema, calidad, transformacion, modelo, preguntas, pipeline
+src/         ingesta, esquema, calidad, transformacion, modelo, preguntas, pipeline, carga_dlt, intermediate, reconciliacion, pipeline_fase2
+dbt_project/ dbt_project.yml, profiles.yml, macros/, models/{staging,intermediate,marts}, tests/
 sql/         modelo/ (dim_zone, fact_trips, dim_date, agg_zone_hour) y q1..q6 (una consulta por archivo)
-tests/       36 tests
+tests/       42 tests (36 originales + 6 de Fase 2 en test_fase2.py)
 scripts/     exploración de datos, verificaciones y demo de reproceso
 dashboard/   app.py (panel opcional Streamlit + Plotly de solo consulta sobre DuckDB)
 docs/        exploracion.md (hallazgos de los datos) e interpretaciones.yaml
 ```
 
-## 8. Declaración de uso de IA
+## 8. Fase 2: Integración dlt + DuckDB + Intermediate + dbt + Docker
+
+### 8.1 Arquitectura y flujo de datos
+
+```mermaid
+flowchart LR
+  RAW["Raw Parquet\ndata/raw/"] -->|"src/carga_dlt.py\n(lotes Arrow 5.000)"| STG["DuckDB staging\nyellow_trips_2024_03\nyellow_trips_2025_03"]
+  RAW -->|"src/calidad.py\n11 reglas + reconciliación"| VAL["Parquet Validada & Cuarentena\ndata/validada/ · data/quarantine/"]
+  VAL -->|"src/intermediate.py\n(rutas relativas portables)"| INT["DuckDB intermediate\ntrips_validated · trips_quarantine"]
+  STG --> REC["src/reconciliacion.py\nSTAGING = ACEPTADAS + CUARENTENA"]
+  INT --> REC
+  INT -->|"dbt views"| DBT_INT["dbt_staging & intermediate\nint_trips_enriched\nint_reconciliation_summary"]
+  DBT_INT -->|"dbt build"| MARTS["dbt marts\nfact_trips (VIEW)\ndim_zone · dim_date · agg_zone_hour"]
+```
+
+- **Base principal de Fase 2:** `data/warehouse/nyc_taxi_dlt.duckdb` (conserva `data/warehouse/taxi.duckdb` intacta).
+- **Ingesta con dlt (`src/carga_dlt.py`):** lee Parquet con `pyarrow.parquet.ParquetFile.iter_batches(batch_size=5000)`, convierte a `pyarrow.Table` y carga a `staging.yellow_trips_{AAAA}_{MM}` con `write_disposition="replace"`. Si la tabla ya existe con el conteo exacto del Parquet, omite la recarga salvo `--forzar`.
+- **Capa `intermediate` portable (`src/intermediate.py`):** crea vistas sobre `data/validada/...` y `data/quarantine/...` usando rutas POSIX relativas (sin `.resolve()`), evitando duplicar los 7,4M de registros en disco y asegurando compatibilidad entre Windows y Docker (`/app`).
+- **Capas dbt (`dbt_project/`):**
+  - `dbt_staging` (`view`): `stg_yellow_trips_2024_03` (`cbd_congestion_fee = NULL`), `stg_yellow_trips_2025_03`, `stg_yellow_trips`, `stg_taxi_zones`.
+  - `intermediate` (`view`): `int_trips_enriched` (reutiliza exactamente las derivadas y joins de `src/transformacion.py`) e `int_reconciliation_summary`.
+  - `marts`: `fact_trips` (`view` para no duplicar 7,4M filas en disco), `dim_zone` (`table`), `dim_date` (`table`) y `agg_zone_hour` (`table`).
+
+### 8.2 Cómo ejecutar Fase 2, dbt y reconciliación
+
+```bash
+# Pipeline integrado completo (ingesta -> esquema -> dlt -> calidad -> intermediate -> reconciliación -> transformación -> dbt build -> verificación final)
+make fase2 MES=2025-03
+# o directo: python -m src.pipeline_fase2 --mes 2025-03
+
+# Etapas individuales
+make intermediate                                            # crea/actualiza vistas intermediate
+make dbt-build                                               # ejecuta 10 modelos + 50 tests dbt
+make dbt-test                                                # ejecuta solo los 50 tests dbt
+make reconciliar                                             # verifica staging = aceptadas + cuarentena y marts
+python -m pytest -q                                          # 42 tests Python (36 Fase 1 + 6 Fase 2)
+```
+
+### 8.3 Ejecución con Docker
+
+```bash
+# Construir imagen (incluye Python 3.12, dlt, DuckDB 1.5.6 y dbt-duckdb)
+docker compose build
+
+# Ejecutar reconciliación, dbt y tests sobre los volúmenes montados (./data, ./reports, ./RESULTADOS.md)
+docker compose run --rm --entrypoint python pipeline -m src.reconciliacion --con-marts
+docker compose run --rm --entrypoint dbt pipeline build --project-dir dbt_project --profiles-dir dbt_project
+docker compose run --rm --entrypoint python pipeline -m pytest -q
+
+# Ejecutar pipeline completo de Fase 2 dentro del contenedor (usando raw ya descargados)
+docker compose run --rm --entrypoint python pipeline -m src.pipeline_fase2 --mes 2025-03 --sin-ingesta
+```
+
+### 8.4 Resultados verificados de Fase 2
+
+| Mes | `staging` (dlt) | `aceptadas` (`intermediate`) | `cuarentena` (`intermediate`) | Diferencia |
+|---|---:|---:|---:|---:|
+| `2024-03` | 3.582.628 | 3.453.562 | 129.066 | 0 |
+| `2025-03` | 4.145.257 | 3.955.293 | 189.964 | 0 |
+| **TOTAL** | **7.727.885** | **7.408.855** | **319.030** | **0** |
+
+- `marts.fact_trips` (VIEW): **7.408.855** filas · `marts.dim_zone`: **265** · `marts.dim_date`: **396** · `marts.agg_zone_hour`: **205.179** (suma de `trips` = **7.408.855**, `total_revenue` = **203.263.790,71 USD**).
+- `dbt build`: **60/60 OK** (10 modelos + 50 tests de integridad, unicidad, relaciones y reconciliación).
+- `python -m src.pipeline_fase2 --mes 2025-03`: **66,1 s** en total con pico de RAM de **1,16 GB** (dentro del límite de 8 GB).
+
+### 8.5 Resumen técnico para defensa oral (Fase 2)
+
+1. **Separación de responsabilidades por capa:** `dlt` resuelve la carga incremental/idempotente por lotes Arrow a DuckDB (`staging`); el motor de calidad original (`src/calidad.py`) mantiene exactamente las 11 reglas SQL con `file_row_number` y separa aceptadas y cuarentena en Parquet sin alterar resultados; `src/intermediate.py` expone ambos resultados como vistas portables con rutas relativas; y `dbt` construye las vistas enriquecidas y el modelo estrella en `marts` con 50 pruebas automatizadas.
+2. **Eficiencia en 8 GB de RAM y disco acotado:** `dlt` procesa de a 5.000 filas; DuckDB y dbt operan con `memory_limit = '1.5GB'`, `threads = 2`, `preserve_insertion_order = false` y `temp_directory` en disco; `fact_trips` e `int_trips_enriched` son vistas para no duplicar 7,4 millones de registros en disco.
+3. **Preparación para Fase 3 (Dagster + Observabilidad):** cada etapa en `src/pipeline_fase2.py` está desacoplada con entradas/salidas explícitas y métricas JSON por corrida (`reports/ejecucion_fase2_*.json`), lista para modelarse como software-defined assets en Dagster junto con Prometheus, Grafana y Dozzle en `docker-compose.yml`.
+
+## 9. Declaración de uso de IA
 
 Usé CLAUDE en el desarrollo para: entender los conceptos (Parquet,
 idempotencia, particionado, modelo dimensional, calidad de datos), armar el plan de trabajo, redactar

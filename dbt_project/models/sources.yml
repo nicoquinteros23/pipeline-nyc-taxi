@@ -1,0 +1,28 @@
+version: 2
+
+sources:
+  - name: dlt_staging
+    description: "Tablas raw mensuales cargadas por dlt desde Parquet hacia DuckDB."
+    schema: staging
+    tables:
+      - name: yellow_trips_2024_03
+        description: "Viajes raw de marzo 2024 cargados por dlt (3.582.628 filas)."
+      - name: yellow_trips_2025_03
+        description: "Viajes raw de marzo 2025 cargados por dlt (4.145.257 filas)."
+
+  - name: pipeline_intermediate
+    description: "Vistas portables sobre Parquet validados y en cuarentena creadas por src/intermediate.py."
+    schema: intermediate
+    tables:
+      - name: trips_validated_2024_03
+        description: "Viajes aceptados de marzo 2024 con columna flags."
+      - name: trips_validated_2025_03
+        description: "Viajes aceptados de marzo 2025 con columna flags."
+      - name: trips_quarantine_2024_03
+        description: "Viajes rechazados de marzo 2024 con reglas_violadas."
+      - name: trips_quarantine_2025_03
+        description: "Viajes rechazados de marzo 2025 con reglas_violadas."
+      - name: trips_validated
+        description: "Vista consolidada de viajes aceptados de 2024-03 y 2025-03."
+      - name: trips_quarantine
+        description: "Vista consolidada de viajes rechazados de 2024-03 y 2025-03."
