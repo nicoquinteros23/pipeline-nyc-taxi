@@ -21,6 +21,7 @@ from src.carga_dlt import cargar_mes
 from src.esquema import validar_mes
 from src.ingesta import ingestar, ingestar_zonas
 from src.intermediate import crear_intermediate
+from src.metrics_exporter import registrar_ejecucion_metricas
 from src.pipeline import ErrorPipeline, _MonitorRam, mes_comparacion
 from src.reconciliacion import imprimir_resumen, reconciliar_fase2
 from src.transformacion import transformar_mes
@@ -104,44 +105,58 @@ def correr_fase2(
 
     with _MonitorRam() as ram:
         inicio = time.perf_counter()
-        if ingesta:
-            etapa("ingesta", _ingesta)
-        etapa("esquema", lambda: [validar_mes(m, base_dir, reports_dir) for m in meses])
-        etapa(
-            "dlt_staging",
-            lambda: [
-                cargar_mes(m, base_dir=base_dir, warehouse_path=warehouse, forzar=forzar_dlt)
-                for m in meses
-            ],
-        )
-        etapa("calidad", lambda: [procesar_mes(m, base_dir, reports_dir) for m in meses])
-        etapa(
-            "intermediate",
-            lambda: crear_intermediate(meses=meses, base_dir=base_dir, warehouse_path=warehouse),
-        )
-        etapa(
-            "reconciliacion",
-            lambda: reconciliar_fase2(meses=meses, warehouse_path=warehouse, verificar_marts=False),
-        )
-        etapa("transformacion", lambda: [transformar_mes(m, base_dir) for m in meses])
-        etapa(
-            "dbt_build",
-            lambda: ejecutar_dbt(
-                "build",
-                dbt_dir=dbt_dir,
-                warehouse_path=warehouse,
-                zones_csv_path=zonas_csv,
-            ),
-        )
-
-        def _verificar_final() -> None:
-            nonlocal reconciliacion_final
-            reconciliacion_final = reconciliar_fase2(
-                meses=meses, warehouse_path=warehouse, verificar_marts=True
+        try:
+            if ingesta:
+                etapa("ingesta", _ingesta)
+            etapa("esquema", lambda: [validar_mes(m, base_dir, reports_dir) for m in meses])
+            etapa(
+                "dlt_staging",
+                lambda: [
+                    cargar_mes(m, base_dir=base_dir, warehouse_path=warehouse, forzar=forzar_dlt)
+                    for m in meses
+                ],
             )
-            imprimir_resumen(reconciliacion_final)
+            etapa("calidad", lambda: [procesar_mes(m, base_dir, reports_dir) for m in meses])
+            etapa(
+                "intermediate",
+                lambda: crear_intermediate(meses=meses, base_dir=base_dir, warehouse_path=warehouse),
+            )
+            etapa(
+                "reconciliacion",
+                lambda: reconciliar_fase2(meses=meses, warehouse_path=warehouse, verificar_marts=False),
+            )
+            etapa("transformacion", lambda: [transformar_mes(m, base_dir) for m in meses])
+            etapa(
+                "dbt_build",
+                lambda: ejecutar_dbt(
+                    "build",
+                    dbt_dir=dbt_dir,
+                    warehouse_path=warehouse,
+                    zones_csv_path=zonas_csv,
+                ),
+            )
 
-        etapa("verificacion_final", _verificar_final)
+            def _verificar_final() -> None:
+                nonlocal reconciliacion_final
+                reconciliacion_final = reconciliar_fase2(
+                    meses=meses, warehouse_path=warehouse, verificar_marts=True
+                )
+                imprimir_resumen(reconciliacion_final)
+
+            etapa("verificacion_final", _verificar_final)
+        except Exception as exc:
+            total_err = round(time.perf_counter() - inicio, 1)
+            registrar_ejecucion_metricas(
+                exito=False,
+                duracion_s=total_err,
+                mes=mes,
+                mes_cmp=mes_cmp,
+                pico_ram_gb=round(ram.pico / 1e9, 2),
+                tiempos_etapas=tiempos,
+                error=str(exc),
+                metrics_path=reports_dir / "pipeline_metrics.json",
+            )
+            raise
         total = round(time.perf_counter() - inicio, 1)
 
     resumen = {
@@ -157,6 +172,16 @@ def correr_fase2(
     reports_dir.mkdir(parents=True, exist_ok=True)
     (reports_dir / f"ejecucion_fase2_{mes}.json").write_text(
         json.dumps(resumen, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    registrar_ejecucion_metricas(
+        exito=True,
+        duracion_s=total,
+        mes=mes,
+        mes_cmp=mes_cmp,
+        pico_ram_gb=resumen["pico_ram_gb"],
+        tiempos_etapas=tiempos,
+        reconciliacion=reconciliacion_final,
+        metrics_path=reports_dir / "pipeline_metrics.json",
     )
     return resumen
 

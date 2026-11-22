@@ -1,0 +1,184 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "options": { "0": { "color": "red", "text": "FALLO" }, "1": { "color": "green", "text": "OK" } }, "type": "value" }
+          ],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 0 },
+      "id": 1,
+      "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [{ "expr": "nyc_taxi_pipeline_last_status", "refId": "A" }],
+      "title": "Estado última corrida",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short", "thresholds": { "mode": "absolute", "steps": [{ "color": "blue", "value": null }] } }, "overrides": [] },
+      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 0 },
+      "id": 2,
+      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [
+        { "expr": "nyc_taxi_pipeline_runs_total", "legendFormat": "Totales", "refId": "A" },
+        { "expr": "nyc_taxi_pipeline_success_total", "legendFormat": "Exitosas", "refId": "B" },
+        { "expr": "nyc_taxi_pipeline_failures_total", "legendFormat": "Fallidas", "refId": "C" }
+      ],
+      "title": "Ejecuciones (Totales / OK / Fallos)",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s", "decimals": 1, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 180 }] } }, "overrides": [] },
+      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 0 },
+      "id": 3,
+      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [{ "expr": "nyc_taxi_pipeline_duration_seconds", "refId": "A" }],
+      "title": "Duración última corrida",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 0 },
+      "id": 4,
+      "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [{ "expr": "nyc_taxi_reconciliation_diff_rows", "refId": "A" }],
+      "title": "Diferencia Reconciliación",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "currencyUSD", "decimals": 0 }, "overrides": [] },
+      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 0 },
+      "id": 5,
+      "options": { "colorMode": "value", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [{ "expr": "nyc_taxi_marts_total_revenue_usd", "refId": "A" }],
+      "title": "Revenue Total Marts (USD)",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "yellow", "value": 1000000000 }, { "color": "green", "value": 2500000000 }] }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 0 },
+      "id": 6,
+      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [{ "expr": "nyc_taxi_disk_free_bytes", "refId": "A" }],
+      "title": "Espacio libre en disco",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "options": { "0": { "color": "red", "text": "DOWN" }, "1": { "color": "green", "text": "UP" } }, "type": "value" }
+          ],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 5, "w": 12, "x": 0, "y": 4 },
+      "id": 7,
+      "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [
+        { "expr": "up", "legendFormat": "scrape:{{job}}", "refId": "A" },
+        { "expr": "nyc_taxi_service_up", "legendFormat": "http:{{service}}", "refId": "B" }
+      ],
+      "title": "Disponibilidad de Servicios y Endpoints",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 5, "w": 12, "x": 12, "y": 4 },
+      "id": 8,
+      "options": { "orientation": "horizontal", "showValue": "always", "displayMode": "gradient" },
+      "targets": [{ "expr": "nyc_taxi_rows_total", "legendFormat": "{{layer}} ({{month}})", "refId": "A" }],
+      "title": "Filas verificadas por Capa y Mes",
+      "type": "bargauge"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "percent", "min": 0, "max": 100 }, "overrides": [] },
+      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 9 },
+      "id": 9,
+      "targets": [
+        { "expr": "nyc_taxi_system_cpu_percent", "legendFormat": "CPU Sistema / Contenedor (%)", "refId": "A" },
+        { "expr": "rate(process_cpu_seconds_total[1m]) * 100", "legendFormat": "CPU Proceso {{job}} (%)", "refId": "B" }
+      ],
+      "title": "Consumo de CPU (%)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "bytes" }, "overrides": [] },
+      "gridPos": { "h": 7, "w": 8, "x": 8, "y": 9 },
+      "id": 10,
+      "targets": [
+        { "expr": "nyc_taxi_system_memory_used_bytes", "legendFormat": "RAM en uso (VM/Host)", "refId": "A" },
+        { "expr": "nyc_taxi_system_memory_available_bytes", "legendFormat": "RAM disponible", "refId": "B" },
+        { "expr": "nyc_taxi_pipeline_peak_ram_bytes", "legendFormat": "Pico RAM último pipeline", "refId": "C" }
+      ],
+      "title": "Uso de Memoria RAM del Entorno y Pipeline",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "bytes" }, "overrides": [] },
+      "gridPos": { "h": 7, "w": 8, "x": 16, "y": 9 },
+      "id": 11,
+      "targets": [
+        { "expr": "process_resident_memory_bytes", "legendFormat": "RSS {{job}}", "refId": "A" }
+      ],
+      "title": "Memoria RSS de Contenedores Instrumentados",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 16 },
+      "id": 12,
+      "options": { "orientation": "horizontal", "showValue": "always", "displayMode": "basic" },
+      "targets": [
+        { "expr": "nyc_taxi_pipeline_stage_duration_seconds", "legendFormat": "{{stage}}", "refId": "A" }
+      ],
+      "title": "Duración por Etapa (última corrida)",
+      "type": "bargauge"
+    }
+  ],
+  "refresh": "5s",
+  "schemaVersion": 39,
+  "tags": ["nyc-taxi", "dagster", "prometheus"],
+  "templating": { "list": [] },
+  "time": { "from": "now-30m", "to": "now" },
+  "timezone": "browser",
+  "title": "NYC Taxi — Pipeline Monitoring",
+  "uid": "nyc-taxi-monitoring",
+  "version": 1
+}
