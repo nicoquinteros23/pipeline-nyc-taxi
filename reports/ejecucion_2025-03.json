@@ -1,15 +1,15 @@
 {
   "mes": "2025-03",
   "mes_comparacion": "2024-03",
-  "fecha_utc": "2026-11-21T13:34:29.545812+00:00",
-  "tiempo_total_s": 34.1,
+  "fecha_utc": "2026-11-22T12:30:02.338080+00:00",
+  "tiempo_total_s": 39.2,
   "tiempos_por_etapa_s": {
-    "ingesta": 0.2,
-    "esquema": 0.1,
-    "calidad": 24.7,
-    "transformacion": 7.5,
-    "modelo": 0.5,
-    "preguntas": 1.1
+    "ingesta": 1.5,
+    "esquema": 0.3,
+    "calidad": 23.1,
+    "transformacion": 8.9,
+    "modelo": 1.5,
+    "preguntas": 4.0
   },
-  "pico_ram_gb": 1.91
+  "pico_ram_gb": 1.29
 }
