@@ -7,13 +7,17 @@ services:
     container_name: nyc-taxi-pipeline
     profiles: ["cli"]
     environment:
+      PYTHONDONTWRITEBYTECODE: "1"
       PYTHONUNBUFFERED: "1"
       PYTHONPATH: /app
       DBT_PROFILES_DIR: /app/dbt_project
       DUCKDB_PATH: data/warehouse/nyc_taxi_dlt.duckdb
       DAGSTER_HOME: /app/data/dagster_home
     volumes:
+      - ./src:/app/src:ro
+      - ./orchestration:/app/orchestration:ro
       - ./data:/app/data
+      - ./orchestration/dagster.yaml:/app/data/dagster_home/dagster.yaml:ro
       - ./reports:/app/reports
       - ./RESULTADOS.md:/app/RESULTADOS.md
     restart: "no"
@@ -28,13 +32,17 @@ services:
     ports:
       - "127.0.0.1:3000:3000"
     environment:
+      PYTHONDONTWRITEBYTECODE: "1"
       PYTHONUNBUFFERED: "1"
       PYTHONPATH: /app
       DBT_PROFILES_DIR: /app/dbt_project
       DUCKDB_PATH: data/warehouse/nyc_taxi_dlt.duckdb
       DAGSTER_HOME: /app/data/dagster_home
     volumes:
+      - ./src:/app/src:ro
+      - ./orchestration:/app/orchestration:ro
       - ./data:/app/data
+      - ./orchestration/dagster.yaml:/app/data/dagster_home/dagster.yaml:ro
       - ./reports:/app/reports
       - ./RESULTADOS.md:/app/RESULTADOS.md
     healthcheck:
@@ -56,11 +64,14 @@ services:
     ports:
       - "127.0.0.1:8000:8000"
     environment:
+      PYTHONDONTWRITEBYTECODE: "1"
       PYTHONUNBUFFERED: "1"
       PYTHONPATH: /app
       DAGSTER_URL: http://dagster-webserver:3000/server_info
       DOZZLE_URL: http://dozzle:8080/healthcheck
     volumes:
+      - ./src:/app/src:ro
+      - ./orchestration:/app/orchestration:ro
       - ./data:/app/data:ro
       - ./reports:/app/reports:ro
     depends_on:
@@ -129,7 +140,6 @@ services:
     environment:
       DOZZLE_NO_ANALYTICS: "true"
       DOZZLE_ENABLE_ACTIONS: "false"
-      DOZZLE_ENABLE_SHELL: "false"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     healthcheck:

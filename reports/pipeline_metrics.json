@@ -1,0 +1,60 @@
+{
+  "runs_total": 5,
+  "success_total": 3,
+  "failures_total": 2,
+  "last_duration_seconds": 180.2,
+  "last_run_timestamp_seconds": 1795363781.7621493,
+  "last_success_timestamp_seconds": 1795363781.7621493,
+  "last_status": 1,
+  "last_mes": "2025-03",
+  "last_mes_comparacion": "2024-03",
+  "peak_ram_gb": 1.54,
+  "stage_durations": {
+    "raw_ingesta": 0.57,
+    "esquema_validado": 1.26,
+    "dlt_staging": 1.32,
+    "calidad_cuarentena": 84.75,
+    "intermediate_views": 2.11,
+    "reconciliacion_intermedia": 3.41,
+    "transformacion_curada": 18.38,
+    "dbt_marts": 43.85,
+    "verificacion_final": 8.99
+  },
+  "reconciliacion": {
+    "meses": {
+      "2024-03": {
+        "staging": 3582628,
+        "aceptadas": 3453562,
+        "cuarentena": 129066,
+        "diferencia": 0
+      },
+      "2025-03": {
+        "staging": 4145257,
+        "aceptadas": 3955293,
+        "cuarentena": 189964,
+        "diferencia": 0
+      }
+    },
+    "totales": {
+      "staging": 7727885,
+      "aceptadas": 7408855,
+      "cuarentena": 319030,
+      "intermediate_trips_validated": 7408855,
+      "intermediate_trips_quarantine": 319030
+    },
+    "marts": {
+      "fact_trips": 7408855,
+      "agg_zone_hour_trips": 7408855,
+      "fact_total_revenue": 203263790.71,
+      "agg_total_revenue": 203263790.71
+    },
+    "ok": true,
+    "errores": []
+  },
+  "last_error": "",
+  "recorded_run_ids": [
+    "a789fdd3-471e-401a-ab49-e446275ab64f",
+    "f0285693-cae2-48e5-8216-d610fea1282a"
+  ],
+  "last_run_id": "f0285693-cae2-48e5-8216-d610fea1282a"
+}

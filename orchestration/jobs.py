@@ -12,7 +12,12 @@ from dagster import (
     success_hook,
 )
 
-from orchestration.resources import TaxiPipelineConfig, resolver_meses, ruta_warehouse
+from orchestration.resources import (
+    TaxiPipelineConfig,
+    adquirir_lock_pipeline,
+    resolver_meses,
+    ruta_warehouse,
+)
 from src.metrics_exporter import registrar_ejecucion_metricas
 from src.reconciliacion import reconciliar_fase2
 
@@ -34,16 +39,35 @@ def _duracion_run_segundos(context: HookContext) -> float:
     return 0.0
 
 
+def _duraciones_etapas(context: HookContext) -> dict[str, float]:
+    """Extrae la duración en segundos de cada paso del run actual en Dagster."""
+    try:
+        step_stats = context.instance.get_run_step_stats(context.run_id)
+        etapas: dict[str, float] = {}
+        ahora = time.time()
+        for st_step in step_stats:
+            if st_step.start_time:
+                fin = float(st_step.end_time) if st_step.end_time else ahora
+                etapas[str(st_step.step_key)] = round(
+                    max(0.0, fin - float(st_step.start_time)), 2
+                )
+        return etapas
+    except Exception:
+        return {}
+
+
 @success_hook
 def registrar_exito_pipeline(context: HookContext) -> None:
     if context.op.name != "verificacion_final":
         return
     cfg = _extraer_config(context)
     mes_cmp, mes = resolver_meses(cfg)
-    wh = ruta_warehouse(Path(cfg.base_dir))
+    base_dir = Path(cfg.base_dir)
+    wh = ruta_warehouse(base_dir)
     rec = None
     try:
-        rec = reconciliar_fase2(meses=(mes_cmp, mes), warehouse_path=wh, verificar_marts=True)
+        with adquirir_lock_pipeline(base_dir):
+            rec = reconciliar_fase2(meses=(mes_cmp, mes), warehouse_path=wh, verificar_marts=True)
     except Exception:
         pass
     registrar_ejecucion_metricas(
@@ -51,8 +75,10 @@ def registrar_exito_pipeline(context: HookContext) -> None:
         duracion_s=_duracion_run_segundos(context),
         mes=mes,
         mes_cmp=mes_cmp,
+        tiempos_etapas=_duraciones_etapas(context),
         reconciliacion=rec,
         metrics_path=Path(cfg.reports_dir) / "pipeline_metrics.json",
+        run_id=context.run_id,
     )
 
 
@@ -65,8 +91,10 @@ def registrar_fallo_pipeline(context: HookContext) -> None:
         duracion_s=_duracion_run_segundos(context),
         mes=mes,
         mes_cmp=mes_cmp,
+        tiempos_etapas=_duraciones_etapas(context),
         error=f"Fallo en asset '{context.op.name}' (run_id={context.run_id})",
         metrics_path=Path(cfg.reports_dir) / "pipeline_metrics.json",
+        run_id=context.run_id,
     )
 
 

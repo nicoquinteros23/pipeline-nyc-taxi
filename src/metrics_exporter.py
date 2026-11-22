@@ -20,7 +20,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import psutil
-from prometheus_client import CollectorRegistry, CONTENT_TYPE_LATEST, generate_latest
+from filelock import FileLock
+from prometheus_client import CollectorRegistry, CONTENT_TYPE_LATEST, ProcessCollector, generate_latest
 from prometheus_client.core import CounterMetricFamily, GaugeMetricFamily
 
 METRICS_FILE_DEFAULT = Path("reports/pipeline_metrics.json")
@@ -43,6 +44,8 @@ def _estado_inicial(fallback_path: Path = FALLBACK_EJECUCION) -> dict:
         "stage_durations": {},
         "reconciliacion": {},
         "last_error": "",
+        "last_run_id": "",
+        "recorded_run_ids": [],
     }
     if fallback_path.is_file():
         try:
@@ -72,9 +75,12 @@ def _estado_inicial(fallback_path: Path = FALLBACK_EJECUCION) -> dict:
 def cargar_metricas(metrics_path: Path = METRICS_FILE_DEFAULT) -> dict:
     metrics_path = Path(metrics_path)
     if metrics_path.is_file():
-        return json.loads(metrics_path.read_text(encoding="utf-8"))
+        try:
+            return json.loads(metrics_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            pass
     fallback = metrics_path.parent / FALLBACK_EJECUCION.name
-    return _estado_inicial(fallback if fallback.is_file() else FALLBACK_EJECUCION)
+    return _estado_inicial(fallback)
 
 
 def registrar_ejecucion_metricas(
@@ -87,39 +93,54 @@ def registrar_ejecucion_metricas(
     reconciliacion: dict | None = None,
     error: str = "",
     metrics_path: Path = METRICS_FILE_DEFAULT,
+    run_id: str | None = None,
 ) -> dict:
     """Actualiza atómicamente ``reports/pipeline_metrics.json`` tras una corrida."""
     metrics_path = Path(metrics_path)
     metrics_path.parent.mkdir(parents=True, exist_ok=True)
-    estado = cargar_metricas(metrics_path)
-    ahora = time.time()
+    lock_path = metrics_path.with_suffix(".lock")
 
-    estado["runs_total"] = int(estado.get("runs_total", 0)) + 1
-    if exito:
-        estado["success_total"] = int(estado.get("success_total", 0)) + 1
-        estado["last_success_timestamp_seconds"] = ahora
-        estado["last_status"] = 1
-        estado["last_error"] = ""
-        if reconciliacion:
-            estado["reconciliacion"] = reconciliacion
-    else:
-        estado["failures_total"] = int(estado.get("failures_total", 0)) + 1
-        estado["last_status"] = 0
-        estado["last_error"] = str(error)[:500]
+    with FileLock(str(lock_path), timeout=15.0):
+        estado = cargar_metricas(metrics_path)
+        registrados = list(estado.get("recorded_run_ids") or [])
+        if run_id and run_id in registrados:
+            return estado
 
-    estado["last_duration_seconds"] = round(float(duracion_s), 2)
-    estado["last_run_timestamp_seconds"] = ahora
-    estado["last_mes"] = mes
-    estado["last_mes_comparacion"] = mes_cmp
-    if pico_ram_gb > 0:
-        estado["peak_ram_gb"] = round(float(pico_ram_gb), 3)
-    if tiempos_etapas:
-        estado["stage_durations"] = dict(tiempos_etapas)
+        ahora = time.time()
 
-    tmp = metrics_path.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(estado, ensure_ascii=False, indent=2), encoding="utf-8")
-    tmp.replace(metrics_path)
-    return estado
+        estado["runs_total"] = int(estado.get("runs_total", 0)) + 1
+        if exito:
+            estado["success_total"] = int(estado.get("success_total", 0)) + 1
+            estado["last_success_timestamp_seconds"] = ahora
+            estado["last_status"] = 1
+            estado["last_error"] = ""
+            if reconciliacion:
+                estado["reconciliacion"] = reconciliacion
+        else:
+            estado["failures_total"] = int(estado.get("failures_total", 0)) + 1
+            estado["last_status"] = 0
+            estado["last_error"] = str(error)[:500]
+
+        estado["last_duration_seconds"] = round(float(duracion_s), 2)
+        estado["last_run_timestamp_seconds"] = ahora
+        estado["last_mes"] = mes
+        estado["last_mes_comparacion"] = mes_cmp
+        if run_id:
+            registrados.append(run_id)
+            estado["recorded_run_ids"] = registrados[-200:]
+            estado["last_run_id"] = run_id
+        else:
+            estado.setdefault("recorded_run_ids", registrados)
+            estado.setdefault("last_run_id", "")
+        if pico_ram_gb > 0:
+            estado["peak_ram_gb"] = round(float(pico_ram_gb), 3)
+        if tiempos_etapas:
+            estado["stage_durations"] = dict(tiempos_etapas)
+
+        tmp = metrics_path.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(estado, ensure_ascii=False, indent=2), encoding="utf-8")
+        tmp.replace(metrics_path)
+        return estado
 
 
 def _probe_http(url: str, timeout: float = 1.5) -> int:
@@ -296,6 +317,10 @@ def construir_registry(
     probe_services: bool = True,
 ) -> CollectorRegistry:
     registry = CollectorRegistry()
+    try:
+        ProcessCollector(registry=registry)
+    except Exception:
+        pass
     registry.register(
         NycTaxiCollector(
             metrics_path=metrics_path,

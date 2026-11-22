@@ -8,6 +8,8 @@ sin cargar el dataset completo en memoria.
 from __future__ import annotations
 
 import json
+import os
+import re
 from pathlib import Path
 
 import duckdb
@@ -19,7 +21,10 @@ import yaml
 
 ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = ROOT / "data"
-WAREHOUSE = DATA_DIR / "warehouse" / "taxi.duckdb"
+DEFAULT_WAREHOUSE = DATA_DIR / "warehouse" / "nyc_taxi_dlt.duckdb"
+DEFAULT_SCHEMA = "marts"
+_SCHEMA_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
 LOG_INGESTA = DATA_DIR / "control" / "ingestion_log.csv"
 REPORTS_DIR = ROOT / "reports"
 CONTRACTS_DIR = ROOT / "contracts"
@@ -31,16 +36,37 @@ COLOR_ANTERIOR = "#64748B" # gris pizarra para año comparación
 COLOR_ROJO = "#EF4444"
 COLOR_VERDE = "#10B981"
 
-st.set_page_config(
-    page_title="Pipeline NYC Taxi — Panel de Defensa",
-    page_icon="🚕",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
+
+def resolver_warehouse() -> Path:
+    """Resuelve la ruta del warehouse DuckDB a partir de ``DUCKDB_PATH``."""
+    raw = os.environ.get("DUCKDB_PATH", "").strip()
+    if not raw:
+        return DEFAULT_WAREHOUSE
+    p = Path(raw)
+    return p if p.is_absolute() else (ROOT / p)
+
+
+def resolver_schema() -> str:
+    """Resuelve y valida el esquema DuckDB a consultar (por defecto ``marts``)."""
+    schema = os.environ.get("DUCKDB_SCHEMA", DEFAULT_SCHEMA).strip() or DEFAULT_SCHEMA
+    if not _SCHEMA_RE.match(schema):
+        raise ValueError(f"Esquema DuckDB inválido: {schema!r}")
+    return schema
+
+
+def etiqueta_warehouse(wh: Path) -> str:
+    """Devuelve una ruta legible relativa al repositorio cuando corresponde."""
+    try:
+        return wh.resolve().relative_to(ROOT.resolve()).as_posix()
+    except ValueError:
+        return str(wh)
+
+
+WAREHOUSE = resolver_warehouse()
 
 
 # ---------------------------------------------------------------------------
-# Utilidades de acceso a datos (siempre bajo demanda y sin bloquear taxi.duckdb)
+# Utilidades de acceso a datos (siempre bajo demanda y sin bloquear DuckDB)
 # ---------------------------------------------------------------------------
 
 def _fmt_int(n: int | float | None) -> str:
@@ -56,15 +82,26 @@ def _fmt_float(n: float | None, dec: int = 2) -> str:
 
 
 @st.cache_data(show_spinner=False)
-def query_warehouse(sql: str, params: tuple | None = None) -> pd.DataFrame:
-    """Ejecuta una consulta agregada o acotada sobre taxi.duckdb en modo READ_ONLY."""
-    con = duckdb.connect(str(WAREHOUSE), read_only=True)
+def _query_warehouse_cached(
+    wh_str: str, schema: str, sql: str, params: tuple | None = None
+) -> pd.DataFrame:
+    """Ejecuta una consulta agregada o acotada sobre DuckDB en modo READ_ONLY."""
+    if not _SCHEMA_RE.match(schema):
+        raise ValueError(f"Esquema DuckDB inválido: {schema!r}")
+    con = duckdb.connect(wh_str, read_only=True)
     try:
-        con.execute("SET memory_limit = '2GB'")
+        con.execute("SET memory_limit = '1.5GB'")
+        con.execute("SET threads = 2")
+        con.execute(f"SET search_path = '{schema},main'")
         cur = con.execute(sql, list(params)) if params is not None else con.execute(sql)
         return cur.df()
     finally:
         con.close()
+
+
+def query_warehouse(sql: str, params: tuple | None = None) -> pd.DataFrame:
+    """Ejecuta una consulta agregada o acotada sobre el warehouse configurado (READ_ONLY)."""
+    return _query_warehouse_cached(str(resolver_warehouse()), resolver_schema(), sql, params)
 
 
 @st.cache_data(show_spinner=False)
@@ -72,7 +109,8 @@ def query_parquet(sql: str, params: tuple | None = None) -> pd.DataFrame:
     """Ejecuta una consulta acotada sobre archivos Parquet (p. ej. cuarentena)."""
     con = duckdb.connect()
     try:
-        con.execute("SET memory_limit = '2GB'")
+        con.execute("SET memory_limit = '1.5GB'")
+        con.execute("SET threads = 2")
         cur = con.execute(sql, list(params)) if params is not None else con.execute(sql)
         return cur.df()
     finally:
@@ -106,10 +144,16 @@ def cargar_log_ingesta() -> pd.DataFrame:
 
 
 @st.cache_data(show_spinner=False)
+def _periodos_disponibles_cached(wh_str: str, schema: str) -> list[tuple[int, int]]:
+    df = _query_warehouse_cached(
+        wh_str, schema, "SELECT DISTINCT year, month FROM fact_trips ORDER BY year DESC, month DESC"
+    )
+    return [(int(r.year), int(r.month)) for r in df.itertuples(index=False)]
+
+
 def periodos_disponibles() -> list[tuple[int, int]]:
     """Lista de (year, month) presentes en fact_trips, ordenados del más reciente al más antiguo."""
-    df = query_warehouse("SELECT DISTINCT year, month FROM fact_trips ORDER BY year DESC, month DESC")
-    return [(int(r.year), int(r.month)) for r in df.itertuples(index=False)]
+    return _periodos_disponibles_cached(str(resolver_warehouse()), resolver_schema())
 
 
 def ejecutar_sql_pregunta(archivo_sql: Path, anio: int, anio_ant: int, mes: int) -> tuple[str, str, pd.DataFrame]:
@@ -131,14 +175,18 @@ def ejecutar_sql_pregunta(archivo_sql: Path, anio: int, anio_ant: int, mes: int)
 def render_tab_ingesta_esquema(mes_str: str, mes_cmp_str: str):
     st.subheader("Ejecución del pipeline, ingesta idempotente y contrato de esquema")
 
-    # 1. Métricas de última corrida
-    ejec = cargar_json(str(REPORTS_DIR / f"ejecucion_{mes_str}.json"))
+    # 1. Métricas de última corrida (Fase 2 prioritario, fallback Fase 1)
+    ruta_fase2 = REPORTS_DIR / f"ejecucion_fase2_{mes_str}.json"
+    ruta_fase1 = REPORTS_DIR / f"ejecucion_{mes_str}.json"
+    origen_ejec = ruta_fase2 if ruta_fase2.exists() else ruta_fase1
+    ejec = cargar_json(str(origen_ejec))
     if ejec:
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("Tiempo total (última corrida)", f"{_fmt_float(ejec['tiempo_total_s'], 1)} s")
         c2.metric("Pico de RAM del proceso", f"{_fmt_float(ejec['pico_ram_gb'], 2)} GB", "Límite examen: 8 GB")
         c3.metric("Período ejecutado", f"{ejec['mes']} vs {ejec['mes_comparacion']}")
         c4.metric("Fecha corrida (UTC)", ejec["fecha_utc"][:19].replace("T", " "))
+        st.caption(f"Fuente de reporte: `{origen_ejec.relative_to(ROOT).as_posix()}`")
 
         tiempos = ejec.get("tiempos_por_etapa_s", {})
         if tiempos:
@@ -164,7 +212,19 @@ def render_tab_ingesta_esquema(mes_str: str, mes_cmp_str: str):
             )
             st.plotly_chart(fig_t)
     else:
-        st.info(f"No se encontró `reports/ejecucion_{mes_str}.json`. Ejecutá `make all MES={mes_str}`.")
+        st.info(
+            f"No se encontró `reports/ejecucion_fase2_{mes_str}.json` ni `reports/ejecucion_{mes_str}.json`. "
+            f"Ejecutá `make fase2 MES={mes_str}`."
+        )
+
+    pm = cargar_json(str(REPORTS_DIR / "pipeline_metrics.json"))
+    if pm:
+        with st.expander("Estado acumulado de orquestación / observabilidad (`reports/pipeline_metrics.json`)"):
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("Corridas totales", _fmt_int(pm.get("runs_total", 0)))
+            m2.metric("Exitosas / Fallos", f"{_fmt_int(pm.get('success_total', 0))} / {_fmt_int(pm.get('failures_total', 0))}")
+            m3.metric("Último estado", "OK" if pm.get("last_status") == 1 else "FALLO")
+            m4.metric("Última duración", f"{_fmt_float(pm.get('last_duration_seconds', 0.0), 1)} s")
 
     st.divider()
 
@@ -458,7 +518,9 @@ def render_tab_calidad(anio: int, anio_ant: int, mes_num: int, mes_str: str, mes
 # ---------------------------------------------------------------------------
 
 def render_tab_modelo(anio: int, anio_ant: int, mes_num: int, mes_str: str, mes_cmp_str: str):
-    st.subheader("Modelo estrella (`data/warehouse/taxi.duckdb`) y verificación de integridad")
+    wh_lbl = etiqueta_warehouse(resolver_warehouse())
+    schema_lbl = resolver_schema()
+    st.subheader(f"Modelo estrella (`{wh_lbl}`, esquema `{schema_lbl}`) y verificación de integridad")
 
     # 1. Conteos vivos y granularidades
     conteos = {}
@@ -615,9 +677,11 @@ ORDER BY anio, hora
 # ---------------------------------------------------------------------------
 
 def render_tab_preguntas(anio: int, anio_ant: int, mes_num: int, mes_str: str, mes_cmp_str: str):
+    wh_lbl = etiqueta_warehouse(resolver_warehouse())
+    schema_lbl = resolver_schema()
     st.subheader(f"Preguntas de negocio sobre el modelo estrella ({mes_str} vs {mes_cmp_str})")
     st.caption(
-        "Cada bloque ejecuta bajo demanda su archivo `sql/q*.sql` contra `taxi.duckdb` (`READ_ONLY`) "
+        f"Cada bloque ejecuta bajo demanda su archivo `sql/q*.sql` contra `{wh_lbl}` (esquema `{schema_lbl}`, `READ_ONLY`) "
         f"reemplazando `{{ANIO}}={anio}`, `{{ANIO_ANT}}={anio_ant}` y `{{MES}}={mes_num}`."
     )
 
@@ -843,16 +907,40 @@ ORDER BY year
 # ---------------------------------------------------------------------------
 
 def main():
+    st.set_page_config(
+        page_title="Pipeline NYC Taxi — Panel de Defensa",
+        page_icon="🚕",
+        layout="wide",
+        initial_sidebar_state="expanded",
+    )
     st.title("🚕 Pipeline NYC Taxi — Panel de Exploración y Defensa")
 
-    if not WAREHOUSE.exists():
+    wh = resolver_warehouse()
+    wh_lbl = etiqueta_warehouse(wh)
+    try:
+        schema = resolver_schema()
+    except ValueError as exc:
+        st.error(f"Configuración inválida de `DUCKDB_SCHEMA`: {exc}")
+        return
+
+    if not wh.exists():
         st.error(
-            "No se encontró `data/warehouse/taxi.duckdb`. "
-            "Corré primero `make all MES=2025-03` (o `python -m src.pipeline --mes 2025-03`) para construir el modelo."
+            f"No se encontró la base DuckDB `{wh_lbl}`. "
+            "Corré primero `make fase2 MES=2025-03` (o `python -m src.pipeline_fase2 --mes 2025-03`) "
+            "o configurá `DUCKDB_PATH` apuntando a un warehouse válido."
         )
         return
 
-    periodos = periodos_disponibles()
+    try:
+        periodos = periodos_disponibles()
+    except Exception as exc:
+        st.error(
+            f"No se pudo consultar `{wh_lbl}` (esquema `{schema}`): {exc}. "
+            "Verificá que dbt haya materializado el esquema `marts` y que ningún proceso de escritura "
+            "mantenga un bloqueo exclusivo sobre DuckDB."
+        )
+        return
+
     if not periodos:
         st.warning("La tabla `fact_trips` no contiene datos.")
         return
@@ -876,7 +964,7 @@ def main():
 
         st.success(f"Consultando: **{mes_str}** vs **{mes_cmp_str}**")
         if (anio_ant, mes_num) not in conjunto:
-            st.warning(f"No hay partición cargada para `{mes_cmp_str}` en `taxi.duckdb`.")
+            st.warning(f"No hay partición cargada para `{mes_cmp_str}` en `{wh_lbl}`.")
 
         if st.button("🔄 Recargar datos", width="stretch"):
             st.cache_data.clear()
@@ -885,7 +973,8 @@ def main():
         st.divider()
         st.caption(
             "**Modo de operación:**\n"
-            "- DuckDB `READ_ONLY` (no bloquea re-ejecuciones de `make all`).\n"
+            f"- Base: `{wh_lbl}` (esquema `{schema}`).\n"
+            "- DuckDB `READ_ONLY` (no bloquea re-ejecuciones de `make fase2` ni Dagster).\n"
             "- Consultas agregadas y `LIMIT` bajo demanda (nunca carga el dataset completo en RAM)."
         )
 

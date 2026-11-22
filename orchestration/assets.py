@@ -125,14 +125,15 @@ def calidad_cuarentena(
     meses = resolver_meses(config)
 
     resumen = {}
-    for m in meses:
-        rep = procesar_mes(m, base_dir=base_dir, reports_dir=reports_dir)
-        resumen[m] = {
-            "leidas": rep["filas_leidas"],
-            "aceptadas": rep["aceptadas"],
-            "cuarentena": rep["cuarentena"],
-            "reconciliacion": rep["reconciliacion"],
-        }
+    with adquirir_lock_pipeline(base_dir):
+        for m in meses:
+            rep = procesar_mes(m, base_dir=base_dir, reports_dir=reports_dir)
+            resumen[m] = {
+                "leidas": rep["filas_leidas"],
+                "aceptadas": rep["aceptadas"],
+                "cuarentena": rep["cuarentena"],
+                "reconciliacion": rep["reconciliacion"],
+            }
 
     dur = round(time.perf_counter() - t0, 2)
     context.log.info(f"calidad_cuarentena OK en {dur}s: {resumen}")
@@ -212,9 +213,10 @@ def transformacion_curada(
     meses = resolver_meses(config)
 
     filas = {}
-    for m in meses:
-        r = transformar_mes(m, base_dir=base_dir)
-        filas[m] = r["filas"]
+    with adquirir_lock_pipeline(base_dir):
+        for m in meses:
+            r = transformar_mes(m, base_dir=base_dir)
+            filas[m] = r["filas"]
 
     dur = round(time.perf_counter() - t0, 2)
     context.log.info(f"transformacion_curada OK en {dur}s: {filas}")

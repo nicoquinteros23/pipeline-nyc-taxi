@@ -4,7 +4,7 @@ Pipeline reproducible que ingiere, valida, limpia y modela los viajes de taxi am
 de dos meses: el mes asignado (**2025-03**) y el mismo mes de 2024 (**2024-03**), junto con la tabla de
 zonas de la TLC. Responde seis preguntas de negocio con SQL sobre el modelo (ver `RESULTADOS.md`).
 
-Stack: Python 3.10 o superior (probado con 3.12.10), DuckDB 1.5.6, dlt 1.32.0, dbt-core 1.12.7, dbt-duckdb 1.11.1, PyArrow 26.0.1, PyYAML, requests, psutil, pytest y Docker.
+Stack: Python 3.10 o superior (probado con 3.12.10), DuckDB 1.5.6, dlt 1.32.0, dbt-core 1.12.7, dbt-duckdb 1.11.1, Dagster 1.13.31, prometheus-client 0.26.0, PyArrow 26.0.1, PyYAML, requests, psutil, pytest, Prometheus, Grafana, Dozzle y Docker Compose.
 
 ## 1. Cómo instalar y ejecutar
 
@@ -41,11 +41,15 @@ Otros comandos:
 | `make reconciliar` | Verifica `staging = aceptadas + cuarentena` y cierre con `marts` de dbt |
 | `make dbt-build` | Ejecuta modelos y tests de dbt (`staging`, `intermediate`, `marts`) |
 | `make dbt-test` | Ejecuta únicamente los 50 tests de dbt |
-| `make test` | Corre los 42 tests automatizados (`pytest`) |
+| `make up` | Levanta los 5 servicios de Fase 3 en Docker Compose (Dagster, Exporter, Prometheus, Grafana y Dozzle) |
+| `make down` | Detiene los contenedores de Docker Compose |
+| `make ps` | Muestra el estado y salud de los contenedores |
+| `make dagster-run MES=2025-03` | Ejecuta en proceso el job `nyc_taxi_pipeline` de Dagster |
+| `make test` | Corre los **54 tests** automatizados (`pytest`: Fase 1 + Fase 2 + Fase 3 + Fase 4) |
 | `make demo-reproceso` | Reprocesa un mes e imprime conteos antes y después (ver sección 3.5) |
 | `make clean-data` | Borra las capas derivadas y reportes (no borra `data/raw`) |
 | `make clean-all` | Borra **todo** (`data/` completo incluyendo `data/raw` y `reports/`) para descargar y correr desde cero |
-| `make dashboard` | Abre el dashboard interactivo opcional (requiere `pip install -r requirements-dashboard.txt`) |
+| `make dashboard` | Abre el dashboard analítico Streamlit en `http://127.0.0.1:8501` (`READ_ONLY` sobre `nyc_taxi_dlt.duckdb`, esquema `marts`) |
 
 Salidas principales: `RESULTADOS.md`, `reports/` (esquema, calidad y tiempos por mes) y `data/`
 (excluido de Git).
@@ -280,14 +284,16 @@ Máquina de medición: AMD Ryzen 3 7320U with Radeon Graphics, 4 nucleos
 
 ```
 README.md  RESULTADOS.md  Makefile  requirements.txt  requirements-dashboard.txt  Dockerfile  docker-compose.yml  .gitignore  .dockerignore
-contracts/   yellow_schema.yaml (contrato de esquema), quality_rules.yaml (reglas de calidad)
-src/         ingesta, esquema, calidad, transformacion, modelo, preguntas, pipeline, carga_dlt, intermediate, reconciliacion, pipeline_fase2
-dbt_project/ dbt_project.yml, profiles.yml, macros/, models/{staging,intermediate,marts}, tests/
-sql/         modelo/ (dim_zone, fact_trips, dim_date, agg_zone_hour) y q1..q6 (una consulta por archivo)
-tests/       42 tests (36 originales + 6 de Fase 2 en test_fase2.py)
-scripts/     exploración de datos, verificaciones y demo de reproceso
-dashboard/   app.py (panel opcional Streamlit + Plotly de solo consulta sobre DuckDB)
-docs/        exploracion.md (hallazgos de los datos) e interpretaciones.yaml
+contracts/     yellow_schema.yaml (contrato de esquema), quality_rules.yaml (reglas de calidad)
+src/           ingesta, esquema, calidad, transformacion, modelo, preguntas, pipeline, carga_dlt, intermediate, reconciliacion, pipeline_fase2, metrics_exporter
+orchestration/ definitions.py, assets.py, jobs.py, resources.py, schedules.py, dagster.yaml (Dagster)
+dbt_project/   dbt_project.yml, profiles.yml, macros/, models/{staging,intermediate,marts}, tests/
+monitoring/    prometheus/prometheus.yml y grafana/{provisioning,dashboards/nyc_taxi_monitoring.json}
+sql/           modelo/ (dim_zone, fact_trips, dim_date, agg_zone_hour) y q1..q6 (una consulta por archivo)
+tests/         54 tests (36 originales + 6 Fase 2 + 8 Fase 3 + 4 Fase 4 en test_fase4_dashboard.py)
+scripts/       exploración de datos, verificaciones y demo de reproceso
+dashboard/     app.py (panel Streamlit + Plotly READ_ONLY sobre nyc_taxi_dlt.duckdb, esquema marts)
+docs/          exploracion.md, interpretaciones.yaml, GUIA_DEFENSA.md (defensa oral/práctica) y DEMO_PROFESOR.md (guion en vivo)
 ```
 
 ## 8. Fase 2: Integración dlt + DuckDB + Intermediate + dbt + Docker
@@ -361,7 +367,136 @@ docker compose run --rm --entrypoint python pipeline -m src.pipeline_fase2 --mes
 2. **Eficiencia en 8 GB de RAM y disco acotado:** `dlt` procesa de a 5.000 filas; DuckDB y dbt operan con `memory_limit = '1.5GB'`, `threads = 2`, `preserve_insertion_order = false` y `temp_directory` en disco; `fact_trips` e `int_trips_enriched` son vistas para no duplicar 7,4 millones de registros en disco.
 3. **Preparación para Fase 3 (Dagster + Observabilidad):** cada etapa en `src/pipeline_fase2.py` está desacoplada con entradas/salidas explícitas y métricas JSON por corrida (`reports/ejecucion_fase2_*.json`), lista para modelarse como software-defined assets en Dagster junto con Prometheus, Grafana y Dozzle en `docker-compose.yml`.
 
-## 9. Declaración de uso de IA
+## 9. Fase 3: Orquestación (Dagster) y Observabilidad (Prometheus, Grafana y Dozzle)
+
+### 9.1 Arquitectura y flujo integrado
+
+```mermaid
+flowchart LR
+  UI["Usuario / Dagster UI\n127.0.0.1:3000"] -->|"job nyc_taxi_pipeline\n(DefaultRunCoordinator + FileLock)"| DAG["9 Assets en serie\nraw_ingesta → verificacion_final"]
+  DAG -->|"escribe datos"| DW["DuckDB + Parquet\nnyc_taxi_dlt.duckdb"]
+  DAG -->|"hooks éxito/fallo"| MET["reports/pipeline_metrics.json"]
+  MET --> EXP["metrics-exporter\n127.0.0.1:8000/metrics"]
+  EXP -->|"scrape cada 5 s"| PROM["Prometheus v2.54.1\n127.0.0.1:9090"]
+  PROM -->|"datasource UID prometheus"| GRAF["Grafana 11.3.0\n127.0.0.1:3001"]
+  SOCK["/var/run/docker.sock (ro)"] --> DOZ["Dozzle v8.8.1\n127.0.0.1:8080"]
+  DAG -.->|"logs stdout/stderr"| DOZ
+```
+
+### 9.2 Servicios Docker, puertos y seguridad
+
+| Contenedor / Servicio | Imagen | Puerto (solo `127.0.0.1`) | Función |
+|---|---|---|---|
+| `nyc-taxi-dagster` (`dagster-webserver`) | `nyc-taxi-platform:fase3` | `127.0.0.1:3000` | UI web, grafo de los 9 assets, ejecución de `nyc_taxi_pipeline` y logs de corridas. |
+| `nyc-taxi-exporter` (`metrics-exporter`) | `nyc-taxi-platform:fase3` | `127.0.0.1:8000` | Expone `/metrics` para Prometheus: estado/duración/filas del pipeline, CPU/RAM/disco con `psutil` y disponibilidad HTTP de Dagster y Dozzle. |
+| `nyc-taxi-prometheus` (`prometheus`) | `prom/prometheus:v2.54.1` | `127.0.0.1:9090` | Recolecta métricas cada 5 s y guarda series temporales (`prometheus_data`, retención 7 días). |
+| `nyc-taxi-grafana` (`grafana`) | `grafana/grafana:11.3.0` | `127.0.0.1:3001` | Dashboard provisionado `NYC Taxi — Pipeline Monitoring` (`grafana_data`). |
+| `nyc-taxi-dozzle` (`dozzle`) | `amir20/dozzle:v8.8.1` | `127.0.0.1:8080` | Visor web en tiempo real de logs de todos los contenedores. |
+| `nyc-taxi-pipeline` (`pipeline`, perfil `cli`) | `nyc-taxi-platform:fase3` | — | Servicio bajo demanda para correr CLI/tests manuales con `docker compose run --rm`. |
+
+**Decisiones de seguridad y concurrencia:**
+- Todos los puertos publican únicamente en `127.0.0.1` (sin exposición en interfaces externas).
+- `dozzle` monta `/var/run/docker.sock:ro` (solo lectura) con `DOZZLE_ENABLE_ACTIONS=false` para impedir reinicios o ejecuciones desde la UI.
+- `grafana` toma credenciales por variables de entorno (`GRAFANA_ADMIN_USER`, `GRAFANA_ADMIN_PASSWORD`, por defecto `admin`/`admin` solo para entorno local).
+- Los 9 assets de Dagster se ejecutan en serie mediante `in_process_executor` + `DefaultRunCoordinator` (`orchestration/dagster.yaml`) y bloqueo `FileLock` (`data/tmp/pipeline_duckdb.lock`), evitando escrituras concurrentes sobre DuckDB y protegiendo los 8 GB de RAM.
+- El schedule `nyc_taxi_monthly_schedule` (`0 6 5 * *`) queda **STOPPED** por defecto para evitar recargas automáticas no deseadas.
+
+### 9.3 Cómo iniciar, usar y detener la plataforma
+
+```powershell
+# 1. Construir imagen e iniciar todos los servicios en segundo plano
+docker compose build
+make up                      # equivalente: docker compose up -d dagster-webserver metrics-exporter prometheus grafana dozzle
+
+# 2. Verificar que los 5 contenedores estén healthy
+make ps                      # equivalente: docker compose ps
+
+# 3. Detener la plataforma (conserva volúmenes y datos)
+make down                    # equivalente: docker compose down
+```
+
+1. **Dagster (`http://127.0.0.1:3000`):** Ir a **Jobs → `nyc_taxi_pipeline` → Launchpad** (o **Assets → Materialize all**). Configuración por defecto: `mes: "2025-03"`, `sin_ingesta: true` (usa los raw ya descargados), `forzar_dlt: false`, `simular_fallo: false`. Para probar detección de fallos sin alterar datos, lanzar con `simular_fallo: true`.
+2. **Prometheus (`http://127.0.0.1:9090`):** En **Status → Targets** deben figurar `prometheus` y `nyc_taxi_exporter` en estado **UP**. Ejemplos PromQL: `nyc_taxi_pipeline_runs_total`, `nyc_taxi_reconciliation_diff_rows`, `nyc_taxi_system_cpu_percent`, `nyc_taxi_system_memory_used_bytes`.
+3. **Grafana (`http://127.0.0.1:3001`):** Ingresar con `admin` / `admin` (o las variables configuradas) → **Dashboards → NYC Taxi → `NYC Taxi — Pipeline Monitoring`** (12 paneles con estado del pipeline, ejecuciones, duración por etapa, reconciliación, CPU, RAM y espacio en disco).
+4. **Dozzle (`http://127.0.0.1:8080`):** Muestra en vivo los logs de `nyc-taxi-dagster`, `nyc-taxi-exporter`, `nyc-taxi-prometheus`, `nyc-taxi-grafana` y `nyc-taxi-dozzle`. **Nota:** como `nyc_taxi_pipeline` corre dentro del proceso de `dagster-webserver`, los logs del pipeline se visualizan dentro del contenedor **`nyc-taxi-dagster`** (además de los Step Logs en la UI de Dagster).
+
+### 9.4 Verificación completa (Fase 3)
+
+```powershell
+python -m pytest -q                                           # 46 tests (Fase 1 + Fase 2 + Fase 3)
+dbt build --project-dir dbt_project --profiles-dir dbt_project  # 60/60 PASS
+python -m src.reconciliacion --con-marts                      # 7.727.885 = 7.408.855 + 319.030
+```
+
+### 9.5 Recursos y limitaciones observadas en Docker Desktop (Windows, 8 GB RAM)
+
+- **Consumo en reposo de los 5 contenedores (`docker stats --no-stream`):** ~416 MiB totales (`nyc-taxi-dagster` ~283 MiB, `nyc-taxi-grafana` ~53 MiB, `nyc-taxi-prometheus` ~42 MiB, `nyc-taxi-exporter` ~30 MiB, `nyc-taxi-dozzle` ~7 MiB).
+- **Ejecución completa de `nyc_taxi_pipeline` dentro de `nyc-taxi-dagster`:** ~228 s (por serialización e I/O sobre volumen montado de Windows), con las mismas cifras verificadas (`7.727.885` staging = `7.408.855` aceptadas + `319.030` cuarentena; `marts.fact_trips = 7.408.855`).
+- **Métricas de contenedores en Windows:** en lugar de cAdvisor (que presenta limitaciones de acceso a cgroups en Docker Desktop sobre Windows), `metrics-exporter` combina métricas reales del proceso/VM Linux (`psutil`, `shutil.disk_usage`), métricas nativas `process_*` de Prometheus y sondas HTTP de disponibilidad hacia Dagster y Dozzle.
+
+### 9.6 Resolución de problemas frecuentes
+
+- **Run en Dagster queda en `QUEUED`:** verificar que `./orchestration/dagster.yaml` esté montado en `/app/data/dagster_home/dagster.yaml` configurando `DefaultRunCoordinator`.
+- **Error `DAGSTER_HOME is not a directory`:** asegurarse de usar `docker-compose.yml` actualizado (el entrypoint crea `/app/data/dagster_home` antes de iniciar `dagster-webserver`).
+- **DuckDB bloqueado (`Conflicting lock`):** no ejecutar simultáneamente el pipeline CLI y un run en Dagster; el dashboard Streamlit abre en `read_only=True` y `src/reconciliacion.py` usa `read_only=True`.
+- **Espacio libre en disco bajo (`< 3 GB`):** limpiar solo temporales de usuario/cachés huérfanas de Docker (`docker builder prune -f`) sin borrar `data/`.
+- **Puerto ocupado (`3000`, `3001`, `8000`, `8080`, `9090`):** comprobar con `Get-NetTCPConnection -State Listen` o ajustar el mapeo izquierdo en `docker-compose.yml`.
+- **Grafana o Prometheus sin datos recién levantados:** esperar 5–10 s al primer ciclo de scrape de Prometheus (`scrape_interval: 5s`).
+
+### 9.7 Guía rápida para defensa oral (preguntas clave)
+
+- **¿Qué problema resuelve Dagster?** Orquesta las 9 etapas con grafo de dependencias explícito (assets), configuración tipada por corrida, captura centralizada de logs, detección inmediata de fallos y control de concurrencia/locks sobre DuckDB.
+- **¿Por qué se utiliza dbt?** Estandariza las capas `dbt_staging` → `intermediate` → `marts` en SQL versionado con `source()`, `ref()`, documentación y 50 tests automáticos de esquema, integridad referencial y reconciliación.
+- **¿Cómo funciona dlt?** Lee los Parquet en streaming por lotes Arrow (`batch_size=5000`), carga a `staging` en DuckDB con `write_disposition="replace"` y omite recargas idempotentes si el conteo coincide.
+- **¿Por qué DuckDB es adecuado?** Motor columnar embebido que lee Parquet directo desde SQL con `memory_limit='1.5GB'`, `threads=2` y volcado a disco (`temp_directory`), permitiendo procesar ~7,7M de filas en 8 GB de RAM.
+- **¿Qué se monitorea con Prometheus?** Targets `up`, disponibilidad HTTP de servicios, contadores de corridas/éxitos/fallos, duración total y por etapa, filas por capa, diferencia de reconciliación (`0`), revenue total, CPU, RAM y espacio en disco.
+- **¿Qué visualiza Grafana?** El dashboard provisionado `NYC Taxi — Pipeline Monitoring` (12 paneles conectados al datasource Prometheus persistente) con el estado en vivo de corridas, calidad/reconciliación y recursos.
+- **¿Qué aporta Dozzle?** Visor web ligero en `:8080` conectado al socket Docker en modo solo lectura (`ro`) para inspeccionar en tiempo real los logs de `nyc-taxi-dagster` (donde corren los jobs), Prometheus, Grafana y el exporter.
+- **¿Cómo se garantiza la calidad, la idempotencia y cero duplicación?** Calidad con las 11 reglas SQL de `contracts/quality_rules.yaml` + reconciliación estricta (`staging == aceptadas + cuarentena`); idempotencia con SHA-256 en ingesta, omisión por conteo en dlt, reemplazo atómico por partición y `CREATE OR REPLACE`; cero duplicación física usando vistas SQL en `intermediate`, `dbt_staging` y `marts.fact_trips`.
+
+## 10. Fase 4: Auditoría Final, Estabilización, Dashboard Analítico y Material de Defensa
+
+### 10.1 Estabilización de concurrencia y métricas
+- **Lock de concurrencia completo (`orchestration/assets.py`):** además de `dlt_staging`, `intermediate_views`, `reconciliacion_intermedia`, `dbt_marts` y `verificacion_final`, también `calidad_cuarentena` y `transformacion_curada` operan protegidas por `adquirir_lock_pipeline()` (`data/tmp/pipeline_duckdb.lock`).
+- **Métricas atómicas y deduplicadas (`src/metrics_exporter.py` + `orchestration/jobs.py`):**
+  - `registrar_ejecucion_metricas()` protege la actualización de `reports/pipeline_metrics.json` con `FileLock` (`reports/pipeline_metrics.lock`) y deduplica eventos mediante `recorded_run_ids` (últimos 200 `run_id`) para evitar doble conteo ante reintentos.
+  - Los hooks de Dagster calculan las duraciones por etapa directamente con `get_run_step_stats(context.run_id)`, actualizando el panel 12 de Grafana tras cada ejecución en Dagster.
+  - `metrics-exporter` registra también `ProcessCollector`, exponiendo `process_resident_memory_bytes` y `process_cpu_seconds_total` para Grafana.
+- **Sincronización Docker sin reconstrucción:** `./src:/app/src:ro` y `./orchestration:/app/orchestration:ro` se montan en solo lectura en `dagster-webserver`, `metrics-exporter` y `pipeline`, manteniendo intacta la imagen `nyc-taxi-platform:fase3` sin consumir espacio adicional en disco.
+
+### 10.2 Dashboard analítico Streamlit (`dashboard/app.py`)
+- **Base por defecto:** consulta `data/warehouse/nyc_taxi_dlt.duckdb` (esquema `marts`) en modo **`READ_ONLY`** con `memory_limit = '1.5GB'` y `threads = 2`, evitando tocar la base heredada `data/warehouse/taxi.duckdb` (versión DuckDB 2.0.0 / v69).
+- **Configuración por entorno:** admite `DUCKDB_PATH` y `DUCKDB_SCHEMA` (por defecto `marts`), aplicando `SET search_path = '<esquema>,main'` para reutilizar directamente las 6 consultas SQL en `sql/q1..q6`.
+- **Cómo iniciarlo (PowerShell / `.venv`):**
+
+```powershell
+# Instalar dependencias opcionales solo si aún no están presentes
+.\.venv\Scripts\pip.exe install -r requirements-dashboard.txt
+
+# Iniciar el dashboard analítico en localhost
+.\.venv\Scripts\python.exe -m streamlit run dashboard/app.py --server.address 127.0.0.1 --server.port 8501
+# o usando Makefile:
+make dashboard
+```
+
+- **Decisión sobre Docker Compose para Streamlit:** no se agregó una imagen/contenedor adicional para Streamlit porque el entorno host opera con espacio en disco restringido (`~2,7 GB` libres) y `8 GB` de RAM totales; agregar Streamlit + Plotly dentro de Docker duplicaría librerías en disco y restaría margen de volcado temporal (*spill*) para DuckDB. Ejecutarlo bajo demanda en `.venv` (`READ_ONLY`) sobre `127.0.0.1:8501` es seguro, inmediato y no interfiere con Dagster.
+
+### 10.3 URLs locales verificadas de toda la plataforma
+
+| Servicio | URL local | Credenciales / Notas |
+|---|---|---|
+| Dagster UI | `http://127.0.0.1:3000` | Sin autenticación local; job `nyc_taxi_pipeline` |
+| Metrics Exporter | `http://127.0.0.1:8000/metrics` | Salud en `http://127.0.0.1:8000/health` |
+| Prometheus | `http://127.0.0.1:9090` | Targets `prometheus` y `nyc_taxi_exporter` |
+| Grafana | `http://127.0.0.1:3001` | `admin` / `admin` (o variables `GRAFANA_ADMIN_*`) |
+| Dozzle (logs) | `http://127.0.0.1:8080` | Solo lectura (`/var/run/docker.sock:ro`), acciones deshabilitadas |
+| Dashboard Streamlit (local) | `http://127.0.0.1:8501` | Bajo demanda vía `make dashboard` (`READ_ONLY`) |
+
+### 10.4 Documentación para la defensa
+- [`docs/GUIA_DEFENSA.md`](docs/GUIA_DEFENSA.md): guía completa (arquitectura, flujo punta a punta, detalle módulo por módulo, 29 conceptos teóricos, 32 preguntas frecuentes con respaldo en código y 10 ejercicios prácticos de estudio).
+- [`docs/DEMO_PROFESOR.md`](docs/DEMO_PROFESOR.md): guion cronometrado de 5 a 10 minutos para demostrar la plataforma en vivo desde PowerShell (incluyendo demostración rápida sin reprocesar 7,7 millones de filas y recuperación de fallos).
+
+## 11. Declaración de uso de IA
 
 Usé CLAUDE en el desarrollo para: entender los conceptos (Parquet,
 idempotencia, particionado, modelo dimensional, calidad de datos), armar el plan de trabajo, redactar
