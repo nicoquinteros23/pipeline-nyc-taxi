@@ -37,18 +37,26 @@ Otros comandos:
 |---|---|
 | `make test` | Corre los 36 tests automatizados |
 | `make demo-reproceso` | Reprocesa un mes e imprime conteos antes y después (ver sección 3.5) |
-| `make clean-data` | Borra las capas derivadas (no borra `data/raw`) |
+| `make clean-data` | Borra las capas derivadas y reportes (no borra `data/raw`) |
+| `make clean-all` | Borra **todo** (`data/` completo incluyendo `data/raw` y `reports/`) para descargar y correr desde cero |
+| `make dashboard` | Abre el dashboard interactivo opcional (requiere `pip install -r requirements-dashboard.txt`) |
 
 Salidas principales: `RESULTADOS.md`, `reports/` (esquema, calidad y tiempos por mes) y `data/`
 (excluido de Git).
 
 ## 2. Arquitectura
 
-```
-ingesta ---> esquema ---> calidad ---> transformacion ---> modelo ---> preguntas
-   |            |            |               |                |            |
- data/raw   reports/     data/validada   data/curated    data/warehouse  RESULTADOS.md
- data/control schema_*   data/quarantine  (Parquet Hive)  taxi.duckdb
+```mermaid
+flowchart LR
+  TLC["TLC CloudFront\n(Parquet + Zonas)"] -->|"ingesta.py\nSHA-256 + 3 reintentos"| RAW["Raw\ndata/raw/"]
+  TLC -->|registra| LOG["Control\ningestion_log.csv"]
+  RAW -->|"esquema.py + calidad.py"| GATE["Validación\ncontrato YAML + 11 reglas\n+ reconciliación"]
+  GATE -->|"aceptadas + flags"| VAL["Validada\ndata/validada/"]
+  GATE -->|"rechazadas + reglas"| Q["Cuarentena\ndata/quarantine/"]
+  GATE -->|reportes| REP["Reportes\nreports/schema_* y calidad_*"]
+  VAL -->|"transformacion.py\nderivadas + zonas"| CUR["Curada Hive\nyear=AAAA/month=M"]
+  CUR -->|"modelo.py"| DW["Modelo\ndata/warehouse/taxi.duckdb"]
+  DW -->|"preguntas.py\nsql/q1..q6"| RES["RESULTADOS.md"]
 ```
 
 | Capa | Ubicación | Contenido |
@@ -188,6 +196,14 @@ que ya estaba guardado.
 | `dim_date` | un día calendario | 396 |
 | `agg_zone_hour` | una combinación de zona de origen, fecha y hora de subida | 205.179 |
 
+```mermaid
+erDiagram
+  dim_zone ||--o{ fact_trips : "pu_location_id (origen)"
+  dim_zone ||--o{ fact_trips : "do_location_id (destino)"
+  dim_date ||--o{ fact_trips : "pickup_date_key"
+  fact_trips ||--o{ agg_zone_hour : "agrega por zona, fecha y hora"
+```
+
 - `fact_trips` es una vista sobre la capa curada: no duplica datos y refleja siempre lo que hay en disco.
 - `trip_id` es `hash(source_file, file_row_number)`: estable entre corridas y único (se verifica con
   `scripts/verificar_modelo.py`).
@@ -256,12 +272,13 @@ Máquina de medición: AMD Ryzen 3 7320U with Radeon Graphics, 4 nucleos
 ## 7. Estructura del repositorio
 
 ```
-README.md  RESULTADOS.md  Makefile  requirements.txt  .gitignore
+README.md  RESULTADOS.md  Makefile  requirements.txt  requirements-dashboard.txt  .gitignore
 contracts/   yellow_schema.yaml (contrato de esquema), quality_rules.yaml (reglas de calidad)
 src/         ingesta, esquema, calidad, transformacion, modelo, preguntas, pipeline
 sql/         modelo/ (dim_zone, fact_trips, dim_date, agg_zone_hour) y q1..q6 (una consulta por archivo)
 tests/       36 tests
 scripts/     exploración de datos, verificaciones y demo de reproceso
+dashboard/   app.py (panel opcional Streamlit + Plotly de solo consulta sobre DuckDB)
 docs/        exploracion.md (hallazgos de los datos) e interpretaciones.yaml
 ```
 

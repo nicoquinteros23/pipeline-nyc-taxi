@@ -63,15 +63,32 @@ def crear_vista_zonas(con, base_dir=Path("data")):
 
 
 def sql_evaluado(sql_origen, contrato, reglas, mes):
-    """Una sola pasada: a cada fila le agrega rn (para duplicados), reglas_rechazo y flags."""
+    """Pre-filtra candidatos a duplicado por hash (bajo uso de RAM) y evalúa reglas y flags."""
     cols = ", ".join(c["name"] for c in contrato["columns"])
     rechazo = [r for r in reglas if r["severidad"] == "rechazo"]
     advert = [r for r in reglas if r["severidad"] == "advertencia"]
     return f"""
-WITH base AS (
-  SELECT *,
-         row_number() OVER (PARTITION BY {cols} ORDER BY file_row_number) AS rn
+WITH origen AS (
+  SELECT *, hash({cols}) AS _row_hash
   FROM ({sql_origen})
+),
+dup_hashes AS (
+  SELECT _row_hash
+  FROM origen
+  GROUP BY _row_hash
+  HAVING count(*) > 1
+),
+dup_rn AS (
+  SELECT file_row_number,
+         row_number() OVER (PARTITION BY {cols} ORDER BY file_row_number) AS rn
+  FROM origen
+  WHERE _row_hash IN (SELECT _row_hash FROM dup_hashes)
+),
+base AS (
+  SELECT o.* EXCLUDE (_row_hash),
+         COALESCE(d.rn, 1) AS rn
+  FROM origen o
+  LEFT JOIN dup_rn d ON d.file_row_number = o.file_row_number
 )
 SELECT *,
   {_case_reglas(rechazo, mes)} AS reglas_rechazo,
@@ -148,7 +165,7 @@ def _escribir_reportes(rep, reports_dir):
 
 
 def procesar_mes(mes, base_dir=Path("data"), reports_dir=Path("reports"),
-                 contrato_path=CONTRATO, reglas_path=REGLAS, memoria="4GB"):
+                 contrato_path=CONTRATO, reglas_path=REGLAS, memoria="1.5GB"):
     anio, mm = mes.split("-")
     contrato = cargar_contrato(contrato_path)
     reglas = cargar_reglas(reglas_path)
@@ -158,48 +175,54 @@ def procesar_mes(mes, base_dir=Path("data"), reports_dir=Path("reports"),
     sql_origen = sql_mes(mes, base_dir, reports_dir, contrato_path)   # valida esquema primero
     filas_leidas = contar_filas(origen)                               # fuente independiente
 
-    con = duckdb.connect()
-    con.execute(f"SET memory_limit = '{memoria}'")
-    con.execute(f"SET temp_directory = '{(base_dir / 'tmp' / 'duckdb').as_posix()}'")
-    crear_vista_zonas(con, base_dir)
-    con.execute("CREATE TEMP TABLE evaluado AS " + sql_evaluado(sql_origen, contrato, reglas, mes))
-
     cols = ", ".join(c["name"] for c in contrato["columns"])
     trabajo = base_dir / "tmp" / f"calidad_{mes}"
     shutil.rmtree(trabajo, ignore_errors=True)
     tmp_val, tmp_cua = trabajo / "validada", trabajo / "cuarentena"
     tmp_val.mkdir(parents=True)
     tmp_cua.mkdir(parents=True)
+    tmp_duck = base_dir / "tmp" / "duckdb"
+    tmp_duck.mkdir(parents=True, exist_ok=True)
 
-    con.execute(f"""COPY (
-        SELECT {cols}, source_file, file_row_number,
-               CASE WHEN flags = '' THEN []::VARCHAR[] ELSE string_split(flags, ',') END AS flags
-        FROM evaluado WHERE reglas_rechazo = '')
-        TO '{(tmp_val / 'data.parquet').as_posix()}' (FORMAT PARQUET, COMPRESSION ZSTD)""")
-    con.execute(f"""COPY (
-        SELECT {cols}, source_file, file_row_number,
-               string_split(reglas_rechazo, ',') AS reglas_violadas
-        FROM evaluado WHERE reglas_rechazo <> '')
-        TO '{(tmp_cua / 'data.parquet').as_posix()}' (FORMAT PARQUET, COMPRESSION ZSTD)""")
+    con = duckdb.connect(str(trabajo / "work.duckdb"))
+    try:
+        con.execute(f"SET memory_limit = '{memoria}'")
+        con.execute(f"SET temp_directory = '{tmp_duck.as_posix()}'")
+        con.execute("SET preserve_insertion_order = false")
+        con.execute("SET threads = 2")
+        crear_vista_zonas(con, base_dir)
+        con.execute("CREATE TABLE evaluado AS " + sql_evaluado(sql_origen, contrato, reglas, mes))
 
-    aceptadas = contar_filas(tmp_val)          # contadas desde lo ESCRITO en disco
-    cuarentena = contar_filas(tmp_cua)
+        con.execute(f"""COPY (
+            SELECT {cols}, source_file, file_row_number,
+                   CASE WHEN flags = '' THEN []::VARCHAR[] ELSE string_split(flags, ',') END AS flags
+            FROM evaluado WHERE reglas_rechazo = '')
+            TO '{(tmp_val / 'data.parquet').as_posix()}' (FORMAT PARQUET, COMPRESSION ZSTD)""")
+        con.execute(f"""COPY (
+            SELECT {cols}, source_file, file_row_number,
+                   string_split(reglas_rechazo, ',') AS reglas_violadas
+            FROM evaluado WHERE reglas_rechazo <> '')
+            TO '{(tmp_cua / 'data.parquet').as_posix()}' (FORMAT PARQUET, COMPRESSION ZSTD)""")
 
-    rechazo = [r for r in reglas if r["severidad"] == "rechazo"]
-    advert = [r for r in reglas if r["severidad"] == "advertencia"]
-    rep = {
-        "mes": mes, "archivo": origen.name,
-        "generado_utc": datetime.now(timezone.utc).isoformat(),
-        "filas_leidas": filas_leidas, "aceptadas": aceptadas, "cuarentena": cuarentena,
-        "pct_cuarentena": round(100.0 * cuarentena / filas_leidas, 2) if filas_leidas else 0.0,
-        "aceptadas_con_advertencia": con.execute(
-            "SELECT count(*) FROM evaluado WHERE reglas_rechazo = '' AND flags <> ''").fetchone()[0],
-        "rechazo_por_regla": _conteos(con, rechazo, "TRUE", "reglas_rechazo"),
-        "advertencias_por_regla": _conteos(con, advert, "reglas_rechazo = ''", "flags"),
-        "nota": "Una fila puede violar varias reglas: la suma de rechazo_por_regla puede superar a cuarentena.",
-        "reglas": [{k: r[k] for k in ("id", "descripcion", "severidad", "umbral")} for r in reglas],
-    }
-    con.close()
+        aceptadas = contar_filas(tmp_val)          # contadas desde lo ESCRITO en disco
+        cuarentena = contar_filas(tmp_cua)
+
+        rechazo = [r for r in reglas if r["severidad"] == "rechazo"]
+        advert = [r for r in reglas if r["severidad"] == "advertencia"]
+        rep = {
+            "mes": mes, "archivo": origen.name,
+            "generado_utc": datetime.now(timezone.utc).isoformat(),
+            "filas_leidas": filas_leidas, "aceptadas": aceptadas, "cuarentena": cuarentena,
+            "pct_cuarentena": round(100.0 * cuarentena / filas_leidas, 2) if filas_leidas else 0.0,
+            "aceptadas_con_advertencia": con.execute(
+                "SELECT count(*) FROM evaluado WHERE reglas_rechazo = '' AND flags <> ''").fetchone()[0],
+            "rechazo_por_regla": _conteos(con, rechazo, "TRUE", "reglas_rechazo"),
+            "advertencias_por_regla": _conteos(con, advert, "reglas_rechazo = ''", "flags"),
+            "nota": "Una fila puede violar varias reglas: la suma de rechazo_por_regla puede superar a cuarentena.",
+            "reglas": [{k: r[k] for k in ("id", "descripcion", "severidad", "umbral")} for r in reglas],
+        }
+    finally:
+        con.close()
 
     try:
         reconciliar(filas_leidas, aceptadas, cuarentena)

@@ -1,7 +1,7 @@
 PY  ?= python
 MES ?= 2025-03
 
-.PHONY: all install test demo-reproceso clean-data
+.PHONY: all install test demo-reproceso clean-data clean-all dashboard
 
 all:
 	$(PY) -m src.pipeline --mes $(MES)
@@ -17,3 +17,9 @@ demo-reproceso:
 
 clean-data:
 	$(PY) -c "import shutil; [shutil.rmtree(p, ignore_errors=True) for p in ['data/curated','data/validada','data/quarantine','data/warehouse','data/control','data/tmp','reports']]"
+
+clean-all:
+	$(PY) -c "import shutil; [shutil.rmtree(p, ignore_errors=True) for p in ['data','reports']]"
+
+dashboard:
+	$(PY) -m streamlit run dashboard/app.py
