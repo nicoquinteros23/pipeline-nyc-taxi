@@ -87,6 +87,12 @@ Hay 11 reglas: las 7 que pide el enunciado más 4 propias. Los umbrales salen de
 | R10 | zona 264/265 "desconocida" (propia) | advertencia |
 | R11 | total mayor a 1000 USD (propia) | rechazo |
 
+Cómo elegimos los umbrales. Para la distancia máxima pusimos 100 millas: el 99,99 % de los viajes recorre menos de 58 millas y por encima de 100 casi no hay viajes, salvo valores imposibles como 320.136 millas. Para la velocidad usamos 100 mph, porque el 99,9 % de los viajes va a menos de 46 mph y lo que sigue son errores de registro. Para el total máximo usamos 1000 USD: el 99,99 % está por debajo de 326 USD y solo 17 viajes de 2025 lo superan. Cada umbral tiene su justificación en `contracts/quality_rules.yaml`.
+
+Por qué R06 y R10 son advertencias y no rechazos. En R06, los pasajeros nulos coinciden uno a uno con los viajes de `payment_type = 0`, que son el 22 % de marzo 2025. No es un error de carga sino algo propio de ese tipo de viaje, y descartarlos dejaría afuera viajes reales con importes correctos. En R10, las zonas 264 y 265 existen en la tabla de zonas pero no dicen dónde fue el viaje, así que el viaje sirve igual y solo lo marcamos.
+
+Tratamiento de nulos. Una fila con fecha, distancia o importe nulo se rechaza, porque sin esos datos no se puede calcular duración, velocidad ni ingresos. Los nulos de columnas opcionales (como `cbd_congestion_fee` en 2024 o `passenger_count`) se dejan como NULL y no se reemplazan por 0. La propina como porcentaje queda en NULL cuando la tarifa es 0, para no dividir por cero.
+
 Las filas rechazadas van a `data/quarantine/` con la fila original, el archivo de origen, el número de fila y la lista de reglas que violaron. Las advertencias no se descartan: quedan marcadas en la columna `flags`.
 
 Por cada mes se genera `reports/calidad_AAAA-MM.md`. Si `leídas ≠ aceptadas + cuarentena`, el pipeline falla y no toca los datos ya guardados.
@@ -101,12 +107,18 @@ Parquet particionado por `year=AAAA/month=M`. Además de las columnas originales
 
 Reprocesar un mes reemplaza solo la partición de ese mes. Primero se escribe en una carpeta temporal y después se cambia por la anterior.
 
-Lo probamos corriendo `make all MES=2025-03` dos veces seguidas. La segunda vez no se volvió a descargar nada (mismo hash) y los conteos dieron igual:
+Para demostrarlo reprocesamos solo marzo 2025 con `python -m src.calidad --mes 2025-03` y comparamos las particiones antes y después:
 
-| Mes | Leídas | Aceptadas | Cuarentena | 1.ª corrida = 2.ª corrida |
-|---|---:|---:|---:|---|
-| 2024-03 | 3.582.628 | 3.453.562 | 129.066 | sí |
-| 2025-03 | 4.145.257 | 3.955.293 | 189.964 | sí |
+| Partición | Filas antes | Filas después | Archivo modificado |
+|---|---:|---:|---|
+| `validada/year=2024/month=3` | 3.453.562 | 3.453.562 | no (17:28:21) |
+| `quarantine/year=2024/month=3` | 129.066 | 129.066 | no (17:28:21) |
+| `validada/year=2025/month=3` | 3.955.293 | 3.955.293 | sí (17:28:31 pasa a 18:13:15) |
+| `quarantine/year=2025/month=3` | 189.964 | 189.964 | sí (17:28:31 pasa a 18:13:15) |
+
+Solo se reescribió la partición de 2025-03. La de 2024-03 quedó con el mismo archivo y la misma hora de modificación, y los conteos no cambiaron.
+
+También corrimos `make all MES=2025-03` dos veces seguidas. La segunda vez no se volvió a descargar nada (mismo hash) y los conteos dieron igual: 3.582.628 leídas en 2024-03 y 4.145.257 en 2025-03, con las mismas aceptadas y cuarentena.
 
 ### 5. Modelo estrella (`dbt_project/models/marts/`)
 
