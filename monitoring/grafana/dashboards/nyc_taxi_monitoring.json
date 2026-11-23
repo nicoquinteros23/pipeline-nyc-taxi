@@ -176,7 +176,7 @@
   "templating": { "list": [] },
   "time": { "from": "now-30m", "to": "now" },
   "timezone": "browser",
-  "title": "NYC Taxi — Pipeline Monitoring",
+  "title": "NYC Taxi - Pipeline Monitoring",
   "uid": "nyc-taxi-monitoring",
   "version": 2
 }

@@ -2,7 +2,7 @@
 
 Archivos: yellow_tripdata_2025-03.parquet (4.145.257 filas) y
 yellow_tripdata_2024-03.parquet (3.582.628 filas), más taxi_zone_lookup.csv.
-Generado con scripts/explorar.py y scripts/explorar2.py.
+Los números salen de consultas en DuckDB sobre los Parquet originales.
 
 ## Esquema
 - La única diferencia de columnas es cbd_congestion_fee, que existe solo en 2025
