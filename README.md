@@ -1,205 +1,142 @@
-# Pipeline Batch NYC Taxi — Arquitectura Dinámica (`make all MES=AAAA-MM`)
+# Pipeline NYC Taxi - Parcial de Fundamentos de Datos
 
-Plataforma reproducible e idempotente de ingeniería de datos para ingerir, validar, limpiar y modelar los viajes de taxi amarillo de Nueva York de **cualquier período mensual `MES=AAAA-MM`** junto con su **mismo mes del año anterior `(AAAA-1)-MM`** y el catálogo oficial de **265 zonas** de la NYC TLC, bajo una **única arquitectura oficial** orquestada por Dagster sobre `data/warehouse/nyc_taxi_dlt.duckdb`, con transformaciones dinámicas en `dbt` y observabilidad real por contenedor Docker en Prometheus, Grafana y Dozzle.
+Pipeline batch que descarga los viajes de taxi amarillo de Nueva York de un mes, los valida, separa las filas malas en cuarentena, arma un modelo estrella y responde 6 preguntas de negocio.
 
-Ver también el resumen técnico en [`docs/ARQUITECTURA_FINAL.md`](docs/ARQUITECTURA_FINAL.md) y los resultados analíticos del último período ejecutado en [`RESULTADOS.md`](RESULTADOS.md) (con copias históricas en `reports/resultados_<MES>.md`).
+El mes que elegimos es marzo 2025, comparado con marzo 2024. Las respuestas están en [`RESULTADOS.md`](RESULTADOS.md).
 
----
+## Integrantes
 
-## 1. Arquitectura definitiva y flujo único oficial
-
-```mermaid
-flowchart LR
-  TLC["TLC CloudFront\n(Parquet YoY + Zonas)"] -->|"1. ingesta_raw\n(ingesta.py + esquema.py)"| RAW["data/raw/"]
-  RAW -->|"2. carga_dlt_staging\n(carga_dlt.py, lotes 5.000)"| STG["DuckDB staging\nyellow_trips_AAAA_MM\n+ yellow_trips_selected + selected_periods"]
-  RAW -->|"3. calidad_cuarentena\n(calidad.py + intermediate.py)"| INT["DuckDB intermediate (VIEW)\ntrips_validated · trips_quarantine"]
-  STG --> REC1["4. reconciliacion_staging\n(reconciliacion.py)"]
-  INT --> REC1
-  INT -->|"5. dbt_marts\n(dbt build --vars selected_months)"| MARTS["DuckDB marts\nfact_trips (VIEW) · dim_zone · dim_date · agg_zone_hour"]
-  MARTS --> REC2["6. verificacion_final\n(reconciliacion.py --con-marts)"]
-  MARTS -->|"7. resultados_analiticos\n(preguntas.py)"| RES["RESULTADOS.md\n+ reports/resultados_MES.md"]
-```
-
-```mermaid
-flowchart LR
-  SOCK["/var/run/docker.sock (ro)"] -->|"DockerStatsCache (5s)"| EXP["metrics-exporter :8000\nCPU & RAM por contenedor + pipeline"]
-  DAG["Dagster :3000\nhooks -> pipeline_metrics.json"] --> EXP
-  EXP -->|"scrape 5s"| PROM["Prometheus :9090"]
-  PROM -->|"UID prometheus"| GRAF["Grafana :3001"]
-  SOCK --> DOZ["Dozzle :8080\nlogs en vivo (solo lectura)"]
-```
-
-### Responsabilidad única por herramienta
-
-| Herramienta | Propiedad en el sistema |
+| Nombre | Legajo |
 |---|---|
-| **Python 3.12 + PyArrow** | Descarga streaming SHA-256 idempotente, validación contra contrato YAML, streaming por lotes y exporter HTTP. |
-| **dlt 1.32.0** | Ingesta idempotente por lotes Arrow de 5.000 filas hacia `staging.yellow_trips_AAAA_MM` (conservando históricos) y consolidación atómica en `staging.yellow_trips_selected` + `staging.selected_periods`. |
-| **DuckDB 1.5.6** | Motor analítico columnar único (`data/warehouse/nyc_taxi_dlt.duckdb`) con límites de memoria acotados (`1GB` en `dbt`, `768MB` en `dlt`, `1.2GB` en `calidad`), `threads=2` y volcado a disco (`data/tmp/duckdb`). |
-| **Calidad (`src/calidad.py` + `src/intermediate.py`)** | Evaluación SQL de las 11 reglas (`R01`–`R11`) de `contracts/quality_rules.yaml`, particiones Parquet `validada/` y `quarantine/`, y vistas transaccionales en `intermediate`. |
-| **dbt 1.12 / dbt-duckdb** | Capas `dbt_staging` → `intermediate` → `marts` (`fact_trips` como `VIEW`, `dim_zone`, `dim_date`, `agg_zone_hour`) sin nombres de meses fijos (`57` nodos en `dbt build`: `8` modelos + `49` pruebas automatizadas). |
-| **Dagster 1.13 (`orchestration/`)** | Único orquestador oficial (`nyc_taxi_pipeline`, 7 *Software-Defined Assets* en serie), invocado tanto desde Dagster UI/GraphQL como desde `orchestration/cli.py` y `make all`. |
-| **Docker & Compose** | Empaquetado y red local de los 5 servicios esenciales (`dagster-webserver`, `metrics-exporter`, `prometheus`, `grafana`, `dozzle`) con puertos acotados a `127.0.0.1`. |
-| **Prometheus + Exporter** | Recolección cada `5 s` de métricas de negocio del pipeline y consumo real individual de CPU/RAM por contenedor Docker. |
-| **Grafana** | Dashboard provisionado `NYC Taxi — Pipeline Monitoring` con 12 paneles en vivo. |
-| **Dozzle** | Visor web de logs en tiempo real conectado al socket Docker en modo solo lectura (`DOZZLE_ENABLE_ACTIONS=false`). |
+| Nicolás Quinteros | 53049 |
+| Josué Limo Muñoz | 58000 |
 
----
+## Cómo correrlo
 
-## 2. Ejecución rápida dinámica (`make all MES=AAAA-MM`)
+Hace falta: Python 3.12, Git, Docker Desktop y `make` (en Windows se instala con `winget install ezwinports.make`).
 
-El único parámetro requerido es `MES` en formato `AAAA-MM`. Automáticamente calcula `mes_comparacion = (AAAA-1)-MM`:
-
-```powershell
-# Período principal enero 2025 (procesa 2024-01 y 2025-01 automáticamente)
-make all MES=2025-01
-
-# Otros ejemplos dinámicos (si los datos oficiales publicados cumplen el contrato)
-make all MES=2025-03
-make all MES=2025-06
-make all MES=2026-01
-
-# Reutilizar Parquets ya descargados sin consultar HTTP (modo offline)
-make all MES=2025-03 SIN_INGESTA=1
-
-# Forzar recarga completa en dlt aunque las filas ya coincidan
-make all MES=2025-01 FORZAR_DLT=1
-```
-
-También se puede invocar el adaptador CLI directamente (llama internamente a `nyc_taxi_pipeline`):
-
-```powershell
-.\.venv\Scripts\python.exe -m orchestration.cli --mes 2025-01
-.\.venv\Scripts\python.exe -m orchestration.cli --mes 2025-03 --sin-ingesta
-```
-
-> **Nota sobre interpretaciones de negocio:** `docs/interpretaciones.yaml` se aplica únicamente al par base (`2024-03`, `2025-03`). Para cualquier otro período (`2025-01`, `2025-06`, etc.), `src/preguntas.py` genera el título dinámico correspondiente (`Enero 2025 vs Enero 2024`), ejecuta las 6 consultas SQL con los filtros del período y muestra `(interpretación pendiente para este período)` para no mezclar texto específico de marzo.
-
----
-
-## 3. Cifras reales verificadas en ejecución end-to-end
-
-Conmutando dinámicamente `Marzo → Enero → Marzo`, `staging` conserva en DuckDB todos los meses históricos ya cargados mientras `staging.yellow_trips_selected`, `intermediate.*`, `marts.*` y `RESULTADOS.md` reflejan exclusivamente el período activo:
-
-### Período base `MES=2025-03` (`2024-03` vs `2025-03`)
-
-| Período | `staging` (`dlt`) | `aceptadas` (`intermediate`) | `cuarentena` (`intermediate`) | Diferencia |
-|---|---:|---:|---:|---:|
-| `2024-03` | 3.582.628 | 3.453.562 | 129.066 | 0 |
-| `2025-03` | 4.145.257 | 3.955.293 | 189.964 | 0 |
-| **TOTAL** | **7.727.885** | **7.408.855** | **319.030** | **0** |
-
-- **Marts:** `marts.fact_trips = 7.408.855`, `marts.dim_zone = 265`, `marts.dim_date = 396`, `marts.agg_zone_hour = 205.179` (`7.408.855` viajes, revenue `203.263.790,71 USD`).
-
-### Período alternativo real `MES=2025-01` (`2024-01` vs `2025-01`)
-
-| Período | `staging` (`dlt`) | `aceptadas` (`intermediate`) | `cuarentena` (`intermediate`) | Diferencia |
-|---|---:|---:|---:|---:|
-| `2024-01` | 2.964.624 | 2.870.976 | 93.648 | 0 |
-| `2025-01` | 3.475.226 | 3.323.516 | 151.710 | 0 |
-| **TOTAL** | **6.439.850** | **6.194.492** | **245.358** | **0** |
-
-- **Marts:** `marts.fact_trips = 6.194.492`, `marts.dim_zone = 265`, `marts.dim_date = 397`, `marts.agg_zone_hour = 167.318` (`6.194.492` viajes, revenue `165.896.143,17 USD`).
-
----
-
-## 4. Instalación y arranque con Docker Compose
-
-Requisitos: Python 3.12, GNU Make (opcional para usar `make all`), Git, Docker Desktop y ~2,5–3 GB libres para datos/imágenes.
-
-```powershell
-# 1. Clonar y crear entorno virtual local
+```bash
 git clone https://github.com/nicoquinteros23/pipeline-nyc-taxi.git
 cd pipeline-nyc-taxi
+git switch dev
 python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-
-# 2. Construir imagen (solo la primera vez) e iniciar los 5 servicios Docker
-docker compose build
-docker compose up -d dagster-webserver metrics-exporter prometheus grafana dozzle
-
-# 3. Verificar que todos estén healthy
-docker compose ps
+.venv/Scripts/pip install -r requirements.txt   # en Linux/Mac: .venv/bin/pip
+make up                                         # levanta Dagster, Grafana, Prometheus y Dozzle
+make all MES=2025-03                            # corre todo el pipeline
+make test                                       # corre los tests
 ```
 
-*(Con `make` disponible: `make install`, `make up`, `make ps`, `make down`).*
+`make all MES=2025-03` procesa el mes pedido y el mismo mes del año anterior. Funciona con cualquier mes publicado por la TLC, por ejemplo `make all MES=2025-01`.
 
-### Puertos locales verificados (solo `127.0.0.1`)
+Servicios que quedan levantados (solo en la máquina local):
 
-| Servicio | Contenedor | URL local | Credenciales / Notas |
-|---|---|---|---|
-| Dagster UI | `nyc-taxi-dagster` | `http://127.0.0.1:3000` | Job `nyc_taxi_pipeline` (7 assets, config `TaxiPipelineConfig`) |
-| Metrics Exporter | `nyc-taxi-exporter` | `http://127.0.0.1:8000/metrics` | Salud en `/health` |
-| Prometheus | `nyc-taxi-prometheus` | `http://127.0.0.1:9090` | Targets `prometheus` y `nyc_taxi_exporter` |
-| Grafana | `nyc-taxi-grafana` | `http://127.0.0.1:3001` | `admin` / `admin` (`GRAFANA_ADMIN_*`) |
-| Dozzle | `nyc-taxi-dozzle` | `http://127.0.0.1:8080` | Solo lectura (`/var/run/docker.sock:ro`) |
+| Servicio | Dirección | Para qué |
+|---|---|---|
+| Dagster | http://127.0.0.1:3000 | ver cada etapa del pipeline y sus logs |
+| Grafana | http://127.0.0.1:3001 (admin / admin) | tablero con tiempos, filas y uso de CPU/RAM |
+| Prometheus | http://127.0.0.1:9090 | junta las métricas que muestra Grafana |
+| Dozzle | http://127.0.0.1:8080 | logs de los contenedores en vivo |
 
----
+## Arquitectura
 
-## 5. Otros comandos de verificación, dbt y tests
-
-```powershell
-# Ejecutar desde Dagster UI (http://127.0.0.1:3000): Jobs -> nyc_taxi_pipeline -> Launchpad -> configurar `mes` y presionar Launch Run
-# O mediante make (equivalente CLI sin red):
-make dagster-run MES=2025-03
-
-# Verificar datos, dbt y consultas analíticas para un período activo:
-.\.venv\Scripts\python.exe -m src.reconciliacion --mes 2025-03 --con-marts
-.\.venv\Scripts\dbt.exe build --project-dir dbt_project --profiles-dir dbt_project --vars "{\"selected_months\": [\"2024-03\", \"2025-03\"]}"
-.\.venv\Scripts\python.exe -m src.preguntas --mes 2025-03 --copia-periodo reports/resultados_2025-03.md
-
-# Suite automatizada completa (unitarias + integración sintética 2025-06 vs 2026-06 + concurrencia):
-.\.venv\Scripts\python.exe -m pytest -v
-
-# Detener los servicios Docker conservando datos y volúmenes:
-docker compose down
+```mermaid
+flowchart LR
+  TLC["Web de la TLC"] -->|ingesta| RAW["data/raw (Parquet original)"]
+  RAW -->|dlt| STG["DuckDB: staging"]
+  RAW -->|esquema + calidad| CUR["data/validada (curada)\ndata/quarantine"]
+  CUR --> INT["DuckDB: intermediate"]
+  INT -->|dbt| MARTS["DuckDB: marts\nfact_trips, dim_zone, dim_date, agg_zone_hour"]
+  MARTS --> RES["RESULTADOS.md"]
 ```
 
----
+La ingesta, el esquema y la calidad están hechos en Python. Como base de datos usamos DuckDB, el modelo estrella se arma con dbt y Dagster se encarga de correr las etapas en orden. Además de lo visto en clase agregamos dlt, Docker, Prometheus, Grafana y Dozzle.
 
-## 6. Observabilidad: Grafana, Prometheus y Dozzle
+## Qué hace cada parte
 
-- **Grafana (`http://127.0.0.1:3001`, usuario `admin` / clave `admin`):** abrir **Dashboards → NYC Taxi → `NYC Taxi — Pipeline Monitoring`**.
-- **Cómo interpretar CPU y RAM por contenedor:**
-  - `metrics-exporter` consulta `/var/run/docker.sock` (`DockerStatsCache`, cada `5 s`) para cada servicio Compose del proyecto.
-  - **CPU (`nyc_taxi_container_cpu_percent`):** calculado mediante delta de `cpu_stats` / `system_cpu_usage × online_cpus × 100`.
-  - **RAM (`nyc_taxi_container_memory_usage_bytes`):** reporta `memory_stats.usage - inactive_file` en bytes (equivalente a `docker stats`, mostrado en MiB por Grafana).
-- **Prometheus (`http://127.0.0.1:9090`):** verificar **Status → Targets** (`prometheus` y `nyc_taxi_exporter` en `UP`). Ejemplos PromQL: `nyc_taxi_container_cpu_percent`, `nyc_taxi_container_memory_usage_bytes`, `nyc_taxi_container_running`, `nyc_taxi_reconciliation_diff_rows`, `nyc_taxi_pipeline_stage_duration_seconds`.
-- **Dozzle (`http://127.0.0.1:8080`):** seleccionar **`nyc-taxi-dagster`** para seguir en vivo los logs de cada asset del pipeline, `dlt` y `dbt build`.
+### 1. Ingesta (`src/ingesta.py`)
 
----
+Descarga el Parquet del mes y la tabla de zonas en `data/raw/yellow/year=AAAA/month=MM/`. Antes de descargar compara el hash SHA-256 con el último registrado. Si es el mismo, no lo vuelve a bajar.
 
-## 7. Estructura del repositorio
+Cada intento queda anotado en `data/control/ingestion_log.csv` con archivo, URL, filas, bytes, hash, fecha y estado.
 
-```text
-contracts/          yellow_schema.yaml (20 columnas) y quality_rules.yaml (R01–R11)
-src/                ingesta.py, esquema.py, carga_dlt.py, calidad.py, intermediate.py,
-                    reconciliacion.py, preguntas.py, metrics_exporter.py
-orchestration/      definitions.py, assets.py (7 assets), jobs.py, resources.py, cli.py, dagster.yaml
-dbt_project/        dbt_project.yml, profiles.yml, macros/, models/{staging,intermediate,marts}, tests/
-monitoring/         prometheus/prometheus.yml y grafana/{provisioning,dashboards/nyc_taxi_monitoring.json}
-reports/            Calidad JSON/MD por mes, pipeline_metrics.json y copias resultados_<MES>.md
-sql/                q1_top_zonas.sql .. q6_variacion.sql
-tests/              Suite pytest (46 tests incluyendo pipeline dinámico sintético 2025-06/2026-06)
-docs/               ARQUITECTURA_FINAL.md, exploracion.md, interpretaciones.yaml
-Dockerfile          docker-compose.yml  Makefile  requirements.txt  RESULTADOS.md
-```
+Si falla la red, reintenta 3 veces esperando cada vez el doble (2, 4 y 8 segundos). Si sigue fallando, el proceso termina con código distinto de 0.
 
----
+### 2. Esquema (`contracts/yellow_schema.yaml`, `src/esquema.py`)
 
-## 8. Seguridad, concurrencia y limitaciones conocidas
+El contrato tiene las 20 columnas esperadas con su tipo. Cada mes se compara contra el contrato: columnas que faltan, columnas nuevas y tipos distintos. Los nombres se pasan a snake_case (por ejemplo, `PULocationID` pasa a ser `pu_location_id`) y los dos meses quedan con el mismo esquema.
 
-- **Concurrencia:** solo puede correr **una ejecución pesada a la vez**. `orchestration/resources.py` bloquea a nivel de ejecución completa mediante `data/tmp/pipeline_run.lock` (`adquirir_lock_ejecucion` / `liberar_lock_ejecucion` en hooks y `finally`), valida runs activos en Dagster (`verificar_sin_otra_ejecucion_activa`) y serializa escrituras puntuales con `data/tmp/pipeline_duckdb.lock` (`in_process_executor` + `DefaultRunCoordinator`).
-- **Seguridad Docker:** todos los puertos escuchan en `127.0.0.1`. `/var/run/docker.sock` se monta en `:ro` únicamente en `metrics-exporter` y `dozzle` (`DOZZLE_ENABLE_ACTIONS=false`).
-- **Disponibilidad TLC y hardware:** los ejemplos futuros (como `2026-01` o `2026-10`) dependen de que los Parquet oficiales correspondan a meses ya publicados por NYC TLC y respeten `contracts/yellow_schema.yaml`. En equipos con 8 GB de RAM, evitar ejecutar corridas locales simultáneas con Docker Desktop cargado al límite de memoria virtual de Windows; usar `SIN_INGESTA=1` cuando se quiera trabajar sin acceso a red. `data/warehouse/taxi.duckdb` se conserva intacta sin dependencias activas. En marzo 2025, `VendorID = 7` (`21.481` filas) entra en cuarentena por `R02` (`bajada <= subida`) y `passenger_count = NULL` coincide 1:1 con `payment_type = 0` (`R06` marcada como advertencia).
+La columna `cbd_congestion_fee` existe recién desde enero de 2025, así que en los datos de 2024 no está. Decidimos dejarla en NULL y no en 0, porque poner 0 daría a entender que el cargo existía y no se cobró. Por eso la pregunta 3 se calcula solo con los datos de 2025.
 
----
+Si aparece una columna nueva que no está en el contrato, se avisa en el reporte de esquema y no se pasa a la capa curada hasta que la agreguemos al contrato. Si falta una columna obligatoria o un tipo no se puede convertir, el pipeline se detiene.
 
-## 9. Visualizar ejecuciones en Dagster UI
+### 3. Calidad (`contracts/quality_rules.yaml`, `src/calidad.py`)
 
-Tanto `make all MES=AAAA-MM` como `make dagster-run MES=AAAA-MM` registran cada corrida en la instancia persistente de Dagster ubicada en `data/dagster_home` (la misma que monta el contenedor `nyc-taxi-dagster`), de modo que las ejecuciones lanzadas por terminal aparecen en la UI web igual que las disparadas desde **Launchpad**:
+Hay 11 reglas: las 7 que pide el enunciado más 4 propias. Los umbrales salen de mirar los datos (`docs/exploracion.md`).
 
-1. Asegúrate de tener los servicios levantados (`make up`) y en estado `healthy` (`make ps`).
-2. Ejecuta el pipeline desde terminal (`make all MES=2025-07` o `make dagster-run MES=2025-07`) o desde Dagster UI (**Jobs → `nyc_taxi_pipeline` → Launchpad**).
-3. Abre `http://127.0.0.1:3000` (o recarga la página) y ve a **Jobs → `nyc_taxi_pipeline` → Runs** para inspeccionar el estado, duración, logs por asset y materializaciones en **Catalog**.
+| Regla | Qué controla | Tipo |
+|---|---|---|
+| R01 | la subida cae fuera del mes | rechazo |
+| R02 | la bajada es anterior o igual a la subida | rechazo |
+| R03 | distancia menor o igual a 0 | rechazo |
+| R04 | distancia mayor a 100 millas | rechazo |
+| R05 | total negativo | rechazo |
+| R06 | pasajeros nulo o 0 | advertencia |
+| R07 | zona que no existe en la tabla de zonas | rechazo |
+| R08 | fila duplicada exacta | rechazo |
+| R09 | velocidad mayor a 100 mph (propia) | rechazo |
+| R10 | zona 264/265 "desconocida" (propia) | advertencia |
+| R11 | total mayor a 1000 USD (propia) | rechazo |
+
+Las filas rechazadas van a `data/quarantine/` con la fila original, el archivo de origen, el número de fila y la lista de reglas que violaron. Las advertencias no se descartan: quedan marcadas en la columna `flags`.
+
+Por cada mes se genera `reports/calidad_AAAA-MM.md`. Si `leídas ≠ aceptadas + cuarentena`, el pipeline falla y no toca los datos ya guardados.
+
+En marzo 2025 quedó el 4,58 % en cuarentena (189.964 filas). Lo que más pesó fue R03 (103.722) y R05 (68.686).
+
+Ejemplo de fila en cuarentena: `yellow_tripdata_2025-03.parquet`, fila 1.048.653, viaje del 11/03 de 11:18 a 11:27 con distancia 0.0, rechazada por la regla `R03`.
+
+### 4. Capa curada (`data/validada/`)
+
+Parquet particionado por `year=AAAA/month=M`. Además de las columnas originales, agrega la duración del viaje en minutos, la velocidad media en mph, la fecha, hora y día de la semana de la subida, la propina como porcentaje de la tarifa (solo cuando la tarifa es mayor a 0) y el barrio y la zona de subida y de bajada, que se sacan de la tabla de zonas.
+
+Reprocesar un mes reemplaza solo la partición de ese mes. Primero se escribe en una carpeta temporal y después se cambia por la anterior.
+
+Lo probamos corriendo `make all MES=2025-03` dos veces seguidas. La segunda vez no se volvió a descargar nada (mismo hash) y los conteos dieron igual:
+
+| Mes | Leídas | Aceptadas | Cuarentena | 1.ª corrida = 2.ª corrida |
+|---|---:|---:|---:|---|
+| 2024-03 | 3.582.628 | 3.453.562 | 129.066 | sí |
+| 2025-03 | 4.145.257 | 3.955.293 | 189.964 | sí |
+
+### 5. Modelo estrella (`dbt_project/models/marts/`)
+
+| Tabla | Granularidad (qué representa una fila) |
+|---|---|
+| `fact_trips` | un viaje aceptado |
+| `dim_zone` | una zona de la TLC (265) |
+| `dim_date` | un día |
+| `agg_zone_hour` | una zona de subida en una fecha y hora (viajes, recaudación y duración media) |
+
+Las 6 consultas están en `sql/q1..q6`. `src/preguntas.py` las corre y escribe `RESULTADOS.md` con el número, la consulta y una interpretación de cada una. dbt además corre tests: que no haya ids repetidos y que los totales de `fact_trips` y `agg_zone_hour` coincidan.
+
+## Tests
+
+`make test` corre 47 tests con pytest. Los que pide el enunciado están en `tests/test_calidad.py` (reglas de calidad con datos sintéticos), `tests/test_ingesta.py` (la ingesta no vuelve a descargar si el archivo no cambió) y `tests/test_reconciliacion.py` (un caso donde los conteos cierran y otro donde no).
+
+## Tiempo y memoria
+
+Lo medimos en una notebook con Windows 11, 8 GB de RAM y Docker abierto. La primera corrida, que incluye la descarga y la carga con dlt, tarda unos 2 minutos. Las siguientes tardan unos 50 segundos porque no vuelven a descargar. El pico de RAM del pipeline fue de 1,54 GB, ya que DuckDB trabaja con un límite de memoria y usa disco temporal cuando lo necesita.
+
+## Limitaciones
+
+- Corre un solo pipeline a la vez. Hay un archivo de bloqueo en `data/tmp/` que lo controla.
+- Depende de que la TLC tenga publicado el mes pedido y de que respete el contrato de columnas.
+- Las interpretaciones de `RESULTADOS.md` están escritas para marzo. Con otro mes se generan los números, pero la interpretación queda pendiente.
+- La partición se llama `month=3`, sin el cero adelante.
+- En marzo 2025 el proveedor `VendorID = 7` (21.481 viajes) tiene la bajada igual a la subida, así que cae en cuarentena por R02.
+
+## Uso de IA
+
+Usamos Claude y Codex. Más que nada los usamos para entender cómo se configuraban dlt, dbt y Dagster, que eran nuevos para nosotros, y para destrabar errores cuando algo no corría (sobre todo con Docker en Windows). También nos ayudaron a armar partes del código, que después probamos y ajustamos.
+
+Las decisiones del trabajo las tomamos nosotros: elegimos marzo, definimos qué viajes se consideran inválidos mirando los datos (por ejemplo, desde qué distancia o velocidad un viaje no tiene sentido), decidimos dejar `cbd_congestion_fee` en NULL para 2024 y escribimos las interpretaciones de los resultados.
