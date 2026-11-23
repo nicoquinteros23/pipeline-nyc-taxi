@@ -71,7 +71,7 @@ Si aparece una columna nueva que no está en el contrato, se avisa en el reporte
 
 ### 3. Calidad (`contracts/quality_rules.yaml`, `src/calidad.py`)
 
-Hay 11 reglas: las 7 que pide el enunciado más 4 propias. Los umbrales salen de mirar los datos (`docs/exploracion.md`).
+Hay 11 reglas. Las 7 condiciones obligatorias del enunciado se cubren con 8 reglas, porque la de distancia se separa en R03 (mínimo) y R04 (máximo), y agregamos 3 propias: R09, R10 y R11. Los umbrales salen de mirar los datos (`docs/exploracion.md`).
 
 | Regla | Qué controla | Tipo |
 |---|---|---|
@@ -133,7 +133,9 @@ Las 6 consultas están en `sql/q1..q6`. `src/preguntas.py` las corre y escribe `
 
 ## Tests
 
-`make test` corre 47 tests con pytest. Los que pide el enunciado están en `tests/test_calidad.py` (reglas de calidad con datos sintéticos), `tests/test_ingesta.py` (la ingesta no vuelve a descargar si el archivo no cambió) y `tests/test_reconciliacion.py` (un caso donde los conteos cierran y otro donde no).
+Los tests se corren con `make test` (son 47, con pytest).
+
+En `tests/test_calidad.py` armamos tablas chicas con datos inventados y revisamos que cada regla marque las filas que corresponden. En `tests/test_ingesta.py` corremos la ingesta dos veces con el mismo archivo y verificamos que se descargue una sola vez. En `tests/test_reconciliacion.py` probamos un caso donde los conteos cierran y otro donde no, y en ese último el pipeline tiene que dar error.
 
 ## Tiempo y memoria
 
