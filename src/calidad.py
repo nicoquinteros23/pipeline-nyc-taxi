@@ -56,11 +56,26 @@ def reglas_violadas(con, tabla, reglas, mes, id_col="id"):
     return {i: r.split(",") for i, r in con.execute(sql).fetchall() if r}
 
 
+# Columnas derivadas de la capa curada (Parte 4). Se calculan una sola vez acá.
+SQL_DERIVADAS = """year(e.tpep_pickup_datetime) AS year,
+                   month(e.tpep_pickup_datetime) AS month,
+                   date_diff('second', e.tpep_pickup_datetime, e.tpep_dropoff_datetime) / 60.0 AS trip_duration_min,
+                   CASE WHEN e.tpep_dropoff_datetime > e.tpep_pickup_datetime
+                        THEN e.trip_distance / (date_diff('second', e.tpep_pickup_datetime, e.tpep_dropoff_datetime) / 3600.0)
+                   END AS avg_speed_mph,
+                   CAST(e.tpep_pickup_datetime AS DATE) AS pickup_date,
+                   hour(e.tpep_pickup_datetime) AS pickup_hour,
+                   isodow(e.tpep_pickup_datetime) AS pickup_dow,
+                   CASE WHEN e.fare_amount > 0 THEN 100.0 * e.tip_amount / e.fare_amount END AS tip_pct,
+                   zp.borough AS pu_borough, zp.zone AS pu_zone,
+                   zd.borough AS do_borough, zd.zone AS do_zone"""
+
+
 def crear_vista_zonas(con, base_dir=Path("data")):
-    """Vista 'zonas' con los ids válidos; la usa la regla R07."""
+    """Vista 'zonas' con id, barrio y zona; la usan la regla R07 y el enriquecimiento de la capa curada."""
     ruta = (base_dir / "raw" / "zones" / "taxi_zone_lookup.csv").as_posix()
     con.execute("CREATE OR REPLACE TEMP VIEW zonas AS "
-                f"SELECT LocationID AS location_id FROM read_csv('{ruta}')")
+                f"SELECT LocationID AS location_id, Borough AS borough, Zone AS zone FROM read_csv('{ruta}')")
 
 
 def sql_evaluado(sql_origen, contrato, reglas, mes):
@@ -198,10 +213,15 @@ def procesar_mes(mes, base_dir=Path("data"), reports_dir=Path("reports"),
         crear_vista_zonas(con, base_dir)
         con.execute("CREATE TABLE evaluado AS " + sql_evaluado(sql_origen, contrato, reglas, mes))
 
+        # Capa curada: columnas originales + columnas derivadas + nombres de zona
         con.execute(f"""COPY (
-            SELECT {cols}, source_file, file_row_number,
-                   CASE WHEN flags = '' THEN []::VARCHAR[] ELSE string_split(flags, ',') END AS flags
-            FROM evaluado WHERE reglas_rechazo = '')
+            SELECT {", ".join("e." + c for c in cols.split(", "))}, e.source_file, e.file_row_number,
+                   CASE WHEN e.flags = '' THEN []::VARCHAR[] ELSE string_split(e.flags, ',') END AS flags,
+                   {SQL_DERIVADAS}
+            FROM evaluado e
+            LEFT JOIN zonas zp ON zp.location_id = e.pu_location_id
+            LEFT JOIN zonas zd ON zd.location_id = e.do_location_id
+            WHERE e.reglas_rechazo = '')
             TO '{(tmp_val / 'data.parquet').as_posix()}' (FORMAT PARQUET, COMPRESSION ZSTD)""")
         con.execute(f"""COPY (
             SELECT {cols}, source_file, file_row_number,
