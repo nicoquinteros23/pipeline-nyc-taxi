@@ -1,0 +1,25 @@
+version: 2
+
+models:
+  - name: int_trips_enriched
+    description: "Vista intermediate enriquecida con métricas derivadas y zonas origen/destino (reutiliza exactamente la lógica de src/transformacion.py sin duplicar datos en disco)."
+    columns:
+      - name: source_file
+        tests: [not_null]
+      - name: file_row_number
+        tests: [not_null]
+      - name: source_month
+        tests: [not_null]
+
+  - name: int_reconciliation_summary
+    description: "Resumen por mes que compara staging (dlt) contra aceptadas + cuarentena (intermediate)."
+    columns:
+      - name: source_month
+        tests: [not_null, unique]
+      - name: diff_rows
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [0]
+                quote: false

@@ -1,0 +1,15 @@
+{
+  "mes": "2025-11",
+  "mes_comparacion": "2024-11",
+  "fecha_utc": "2026-11-21T20:55:09.473388+00:00",
+  "tiempo_total_s": 41.0,
+  "tiempos_por_etapa_s": {
+    "ingesta": 3.5,
+    "esquema": 0.1,
+    "calidad": 20.9,
+    "transformacion": 6.8,
+    "modelo": 1.5,
+    "preguntas": 8.1
+  },
+  "pico_ram_gb": 1.12
+}

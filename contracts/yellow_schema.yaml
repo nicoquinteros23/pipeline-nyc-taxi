@@ -1,0 +1,29 @@
+version: 1
+dataset: yellow_taxi_trips
+columns:
+  - {name: vendor_id, type: INTEGER, nullable: true, aliases: [VendorID]}
+  - {name: tpep_pickup_datetime, type: TIMESTAMP, nullable: false}
+  - {name: tpep_dropoff_datetime, type: TIMESTAMP, nullable: false}
+  - {name: passenger_count, type: BIGINT, nullable: true}
+  - {name: trip_distance, type: DOUBLE, nullable: false}
+  - {name: ratecode_id, type: BIGINT, nullable: true, aliases: [RatecodeID]}
+  - {name: store_and_fwd_flag, type: VARCHAR, nullable: true}
+  - {name: pu_location_id, type: INTEGER, nullable: false, aliases: [PULocationID]}
+  - {name: do_location_id, type: INTEGER, nullable: false, aliases: [DOLocationID]}
+  - {name: payment_type, type: BIGINT, nullable: false}
+  - {name: fare_amount, type: DOUBLE, nullable: false}
+  - {name: extra, type: DOUBLE, nullable: false}
+  - {name: mta_tax, type: DOUBLE, nullable: false}
+  - {name: tip_amount, type: DOUBLE, nullable: false}
+  - {name: tolls_amount, type: DOUBLE, nullable: false}
+  - {name: improvement_surcharge, type: DOUBLE, nullable: false}
+  - {name: total_amount, type: DOUBLE, nullable: false}
+  - {name: congestion_surcharge, type: DOUBLE, nullable: true}
+  - {name: airport_fee, type: DOUBLE, nullable: true, aliases: [Airport_fee]}
+  - {name: cbd_congestion_fee, type: DOUBLE, nullable: true}  # solo desde 2025
+policy:
+  columna_nueva: advertir_y_descartar_de_curada
+  columna_faltante_nullable: advertir_y_completar_con_null
+  columna_faltante_obligatoria: fallar
+  tipo_distinto_compatible: advertir_y_castear
+  tipo_distinto_incompatible: fallar

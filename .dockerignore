@@ -1,0 +1,16 @@
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.git/
+.gitignore
+.vscode/
+.idea/
+data/
+*.duckdb
+*.wal
+*.log
+dbt_project/target/
+dbt_project/logs/
+dbt_project/dbt_packages/

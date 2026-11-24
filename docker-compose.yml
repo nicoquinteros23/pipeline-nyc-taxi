@@ -1,0 +1,135 @@
+services:
+  dagster-webserver:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: nyc-taxi-platform:fase3
+    container_name: nyc-taxi-dagster
+    entrypoint: ["sh", "-c", "mkdir -p /app/data/dagster_home /app/data/tmp/duckdb && exec dagster-webserver -h 0.0.0.0 -p 3000 -m orchestration.definitions"]
+    ports:
+      - "127.0.0.1:3000:3000"
+    environment:
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONUNBUFFERED: "1"
+      PYTHONPATH: /app
+      DBT_PROFILES_DIR: /app/dbt_project
+      DUCKDB_PATH: data/warehouse/nyc_taxi_dlt.duckdb
+      DAGSTER_HOME: /app/data/dagster_home
+    volumes:
+      - ./src:/app/src:ro
+      - ./orchestration:/app/orchestration:ro
+      - ./dbt_project:/app/dbt_project
+      - ./contracts:/app/contracts:ro
+      - ./sql:/app/sql:ro
+      - ./docs:/app/docs:ro
+      - ./data:/app/data
+      - ./orchestration/dagster.yaml:/app/data/dagster_home/dagster.yaml:ro
+      - ./reports:/app/reports
+      - ./RESULTADOS.md:/app/RESULTADOS.md
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:3000/server_info', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+
+  metrics-exporter:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: nyc-taxi-platform:fase3
+    container_name: nyc-taxi-exporter
+    entrypoint: ["python", "-m", "src.metrics_exporter"]
+    command: ["--port", "8000"]
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONUNBUFFERED: "1"
+      PYTHONPATH: /app
+      DOCKER_COMPOSE_PROJECT: pipeline-nyc-taxi
+    volumes:
+      - ./src:/app/src:ro
+      - ./data:/app/data:ro
+      - ./reports:/app/reports:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on:
+      - dagster-webserver
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    container_name: nyc-taxi-prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=7d"
+    ports:
+      - "127.0.0.1:9090:9090"
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    depends_on:
+      metrics-exporter:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:9090/-/healthy"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:11.3.0
+    container_name: nyc-taxi-grafana
+    ports:
+      - "127.0.0.1:3001:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:3000/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
+
+  dozzle:
+    image: amir20/dozzle:v8.8.1
+    container_name: nyc-taxi-dozzle
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      DOZZLE_NO_ANALYTICS: "true"
+      DOZZLE_ENABLE_ACTIONS: "false"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    healthcheck:
+      test: ["CMD", "/dozzle", "healthcheck"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+volumes:
+  prometheus_data:
+  grafana_data:

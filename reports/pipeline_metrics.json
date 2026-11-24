@@ -1,0 +1,78 @@
+{
+  "runs_total": 25,
+  "success_total": 18,
+  "failures_total": 7,
+  "last_duration_seconds": 43.27,
+  "last_run_timestamp_seconds": 1795465731.769176,
+  "last_success_timestamp_seconds": 1795465731.769176,
+  "last_status": 1,
+  "last_mes": "2025-03",
+  "last_mes_comparacion": "2024-03",
+  "peak_ram_gb": 1.54,
+  "stage_durations": {
+    "ingesta_raw": 1.15,
+    "carga_dlt_staging": 1.58,
+    "calidad_cuarentena": 19.96,
+    "reconciliacion_staging": 1.03,
+    "dbt_marts": 12.35,
+    "verificacion_final": 1.35,
+    "resultados_analiticos": 1.41
+  },
+  "reconciliacion": {
+    "meses": {
+      "2024-03": {
+        "staging": 3582628,
+        "aceptadas": 3453562,
+        "cuarentena": 129066,
+        "diferencia": 0
+      },
+      "2025-03": {
+        "staging": 4145257,
+        "aceptadas": 3955293,
+        "cuarentena": 189964,
+        "diferencia": 0
+      }
+    },
+    "totales": {
+      "staging": 7727885,
+      "aceptadas": 7408855,
+      "cuarentena": 319030,
+      "intermediate_trips_validated": 7408855,
+      "intermediate_trips_quarantine": 319030
+    },
+    "marts": {
+      "fact_trips": 7408855,
+      "agg_zone_hour_trips": 7408855,
+      "fact_total_revenue": 203263790.71,
+      "agg_total_revenue": 203263790.71
+    },
+    "ok": true,
+    "errores": []
+  },
+  "last_error": "",
+  "recorded_run_ids": [
+    "a789fdd3-471e-401a-ab49-e446275ab64f",
+    "f0285693-cae2-48e5-8216-d610fea1282a",
+    "5624dbd4-2213-4b53-a6d1-45ea03d9bcbf",
+    "500dbf52-45cc-4bd5-b58e-6d2a88562161",
+    "09094523-0f3f-4c1a-af0d-9e1371dbb2c7",
+    "0184b3aa-ed8e-4616-abf2-81d7e9aca2f9",
+    "bafac89c-3b49-46d2-a301-6fc4d28a125f",
+    "c8b43efc-146a-4498-a72d-9fd96899c78a",
+    "d5ae4a72-dfe2-49f3-94f4-13b39a917470",
+    "842f9f8f-4ead-436e-bcb4-bf276f563c53",
+    "3a83f9a5-77ed-4a3b-971b-97eba4b9813d",
+    "8c1869d5-eddc-4fa7-bb03-ee9eb7136aa3",
+    "918a9256-c456-42fa-85e5-1b990f125914",
+    "5b043e00-340c-4fff-8f13-0537df51b0b7",
+    "eec9a5fd-fe5e-422f-beee-2cf5136a8793",
+    "5b2fc24f-eb67-4c93-8841-98645985bccf",
+    "15195d39-3d0c-4b36-83ee-e3770a7fbd14",
+    "7a7972bf-8147-4426-b3e1-0c44aee3e7d4",
+    "ab46e2a3-c1e4-4787-a58d-f10032e8410e",
+    "5f04341e-64d8-43b6-9831-6b186614d244",
+    "c992f66c-01fa-4d4c-b0e2-d75fb27829e5",
+    "a786e88f-67fd-41f8-b2ce-dcfcd97b693b"
+  ],
+  "last_run_id": "a786e88f-67fd-41f8-b2ce-dcfcd97b693b"
+}

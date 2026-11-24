@@ -1,0 +1,23 @@
+version: 2
+
+models:
+  - name: stg_yellow_trips
+    description: "Vista unificada y normalizada de los viajes raw cargados por dlt para los períodos seleccionados."
+    columns:
+      - name: source_month
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: source('dlt_staging', 'selected_periods')
+                field: source_month
+
+  - name: stg_taxi_zones
+    description: "Catálogo oficial de zonas de taxi de NYC leído desde taxi_zone_lookup.csv."
+    columns:
+      - name: location_id
+        tests: [not_null, unique]
+      - name: borough
+        tests: [not_null]
+      - name: zone
+        tests: [not_null]

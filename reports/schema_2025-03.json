@@ -1,0 +1,33 @@
+{
+  "faltantes": [],
+  "nuevas": [],
+  "tipos_distintos": {},
+  "origen_de_cada_columna": {
+    "vendor_id": "VendorID",
+    "tpep_pickup_datetime": "tpep_pickup_datetime",
+    "tpep_dropoff_datetime": "tpep_dropoff_datetime",
+    "passenger_count": "passenger_count",
+    "trip_distance": "trip_distance",
+    "ratecode_id": "RatecodeID",
+    "store_and_fwd_flag": "store_and_fwd_flag",
+    "pu_location_id": "PULocationID",
+    "do_location_id": "DOLocationID",
+    "payment_type": "payment_type",
+    "fare_amount": "fare_amount",
+    "extra": "extra",
+    "mta_tax": "mta_tax",
+    "tip_amount": "tip_amount",
+    "tolls_amount": "tolls_amount",
+    "improvement_surcharge": "improvement_surcharge",
+    "total_amount": "total_amount",
+    "congestion_surcharge": "congestion_surcharge",
+    "airport_fee": "Airport_fee",
+    "cbd_congestion_fee": "cbd_congestion_fee"
+  },
+  "mes": "2025-03",
+  "archivo": "yellow_tripdata_2025-03.parquet",
+  "version_contrato": 1,
+  "advertencias": [],
+  "errores": [],
+  "estado": "ok"
+}
